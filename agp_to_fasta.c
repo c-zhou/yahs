@@ -24,50 +24,86 @@
 
 /********************************** Revision History *****************************
  *                                                                               *
- * 02/09/21 - Chenxi Zhou: Created                                               *
+ * 22/06/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
 #include <stdlib.h>
-#include <stdint.h>
+#include <stdio.h>
+
+#include "ketopt.h"
 #include "sdict.h"
 
-#define SQRT2 1.41421356237
-#define SQRT2_2 0.70710678118
-
-typedef struct {
-    int32_t s; // seq id
-    int32_t n; // link bin number
-    int64_t *link; // bin pos << 32 | link count 
-} link_t;
-
-typedef struct {
-    int32_t b; // bin size
-    int32_t n; // number seqs
-    link_t *link;
-} link_mat_t;
-
-typedef struct {
-    int32_t n, m, s; //s: seq id
-    int32_t *p;
-} bp_t;
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-link_t *link_init(int32_t s, int32_t n);
-link_mat_t *link_mat_init(asm_dict_t *dict, int32_t b);
-link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, int32_t dist_thres, int32_t resolution, int32_t move_avg);
-int estimate_dist_thres_from_file(const char *f, sdict_t *dict, double min_frac, int32_t resolution);
-void link_mat_destroy(link_mat_t *link_mat);
-void print_link_mat(link_mat_t *link_mat, asm_dict_t *dict, FILE *fp);
-bp_t *detect_break_points(link_mat_t *link_mat, int32_t bin_size, int32_t merge_size, double fold_thres, int32_t dual_break_thres, int *bp_n);
-void print_break_point(bp_t *bp, asm_dict_t *dict, FILE *fp);
-bp_t *detect_break_points_local_joint(link_mat_t *link_mat, int32_t bin_size, double fold_thres, int32_t flank_size, asm_dict_t *dict, int *bp_n);
-void write_break_agp(asm_dict_t *d, bp_t *breaks, int32_t b_n, FILE *fp);
-
-#ifdef __cplusplus
+static void print_help(FILE *fp_help)
+{
+    fprintf(fp_help, "Usage: agp_to_fasta [options] <scaffolds.agp> <contigs.fa>\n");
+    fprintf(fp_help, "Options:\n");
+    fprintf(fp_help, "    -l INT            line width [60]\n");
+    fprintf(fp_help, "    -o STR            output to file [stdout]\n");
 }
-#endif
 
+static ko_longopt_t long_options[] = {
+    { "help",           ko_no_argument, 'h' },
+    { 0, 0, 0 }
+};
 
+int main(int argc, char *argv[])
+{
+    if (argc < 2) {
+        print_help(stderr);
+        return 1;
+    }
+
+    FILE *fo;
+    char *fa, *agp, *out;
+    int line_wd;
+
+    const char *opt_str = "o:l:h";
+    ketopt_t opt = KETOPT_INIT;
+    int c;
+    FILE *fp_help = stderr;
+    fa = agp = out = 0;
+    line_wd = 60;
+
+    while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
+        if (c == 'l') {
+            line_wd = atoi(opt.arg);
+        } else if (c == 'o') {
+            out = opt.arg;
+        } else if (c == 'h') {
+            fp_help = stdout;
+        }else if (c == '?') {
+            fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
+            return 1;
+        } else if (c == ':') {
+            fprintf(stderr, "[E::%s] missing option: \"%s\"\n", __func__, argv[opt.i - 1]);
+            return 1;
+        }
+    }
+
+    if (fp_help == stdout) {
+        print_help(stdout);
+        return 0;
+    }
+
+    if (argc - opt.ind < 2) {
+        fprintf(stderr, "[E::%s] missing input: three positional options required\n", __func__);
+        print_help(stderr);
+        return 1;
+    }
+
+    agp = argv[opt.ind];
+    fa = argv[opt.ind + 1];
+
+    fo = out == 0? stdout : fopen(out, "w");
+    if (fo == 0) {
+        fprintf(stderr, "[E::%s] cannot open fail %s for writing\n", __func__, out);
+        exit(EXIT_FAILURE);
+    }
+    
+    write_fasta_file_from_agp(fa, agp, fo, line_wd);
+
+    if (out != 0)
+        fclose(fo);
+    
+    return 0;
+}

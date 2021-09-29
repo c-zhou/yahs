@@ -131,36 +131,36 @@ void calc_moving_average(int64_t *arr, int32_t n, int32_t a)
     if (n < a) {
         a = n;
     }
-	a1 = a >> 1;
-	a2 = ~a & 1;
+    a1 = a >> 1;
+    a2 = ~a & 1;
 
-	int64_t *buff = (int64_t *) malloc(a * sizeof(int64_t));
-	int64_t sum = 0;
-	for (i = 0; i < a; ++i) {
-		buff[i] = arr[i];
-		sum += buff[i];
-		if (i >= a1)
+    int64_t *buff = (int64_t *) malloc(a * sizeof(int64_t));
+    int64_t sum = 0;
+    for (i = 0; i < a; ++i) {
+        buff[i] = arr[i];
+        sum += buff[i];
+        if (i >= a1)
             arr[i - a1] = sum / (i + 1);
-	}
-	pos = 0;
+    }
+    pos = 0;
 
-	for (i = a1; i < n - a1 + a2; ++i) {
-		arr[i] = sum / a;
-		if (i < n - a + a1) {
-			sum -= buff[pos];
-			buff[pos] = arr[i + a - a1];
-			sum += buff[pos];
-			if (++pos == a)
+    for (i = a1; i < n - a1 + a2; ++i) {
+        arr[i] = sum / a;
+        if (i < n - a + a1) {
+            sum -= buff[pos];
+            buff[pos] = arr[i + a - a1];
+            sum += buff[pos];
+            if (++pos == a)
                 pos = 0;
-		}
-	}
+        }
+    }
 
-	for (i = n - a1 + a2; i < n; ++i) {
-		sum -= buff[pos];
-		arr[i] = sum / (a1 + n - i);
-		if (++pos == a)
+    for (i = n - a1 + a2; i < n; ++i) {
+        sum -= buff[pos];
+        arr[i] = sum / (a1 + n - i);
+        if (++pos == a)
             pos = 0;
-	}
+    }
 
     free(buff);
 }
@@ -526,23 +526,7 @@ void print_break_point(bp_t *bp, asm_dict_t *dict, FILE *fp)
     fprintf(fp, "\n");
 }
 
-static void write_segs_to_agp(sd_seg_t *segs, int n, sdict_t *sd, int s, FILE *fp)
-{
-    uint64_t len = 0;
-    sd_seg_t seg;
-    int i, t = 0;
-    for (i = 0; i < n; ++i) {
-        seg = segs[i];
-        fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%d\t%d\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
-        len += seg.y;
-        if (i != n - 1) {
-            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
-            len += GAP_SZ;
-        }
-    }
-}
-
-void write_agp(asm_dict_t *d, bp_t *breaks, int32_t b_n, FILE *fp)
+void write_break_agp(asm_dict_t *d, bp_t *breaks, int32_t b_n, FILE *fp)
 {
     int i, j, L, l, s, ns, ms;
     uint64_t len;

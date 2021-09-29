@@ -32,6 +32,7 @@
 #include <zlib.h>
 
 #include "khash.h"
+#include "asset.h"
 #include "sdict.h"
 #include "ksort.h"
 #include "kseq.h"
@@ -436,9 +437,9 @@ char comp_table[] = {
     'p', 'q', 'y', 's', 'a', 'a', 'b', 'w', 'x', 'r', 'z', 123, 124, 125, 126, 127
 };
 
-void write_fasta_file_from_agp(const char *fa, const char *agp, const char *out, int line_wd)
+void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd)
 {
-    FILE *agp_in, *fa_out;
+    FILE *agp_in;
     char *line = NULL;
     sdict_t *dict;
     sd_seq_t s;
@@ -453,12 +454,6 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, const char *out,
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, agp);
         exit(EXIT_FAILURE);
     }
-    
-    fa_out = fopen(out, "w");
-    if (fa_out == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
-        exit(EXIT_FAILURE);
-    }
 
     dict = make_sdict_from_fa(fa);
     l = 0;
@@ -467,21 +462,23 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, const char *out,
         if (!strncmp(type, "N", 1)) {
             cend = strtol(cname, NULL, 10);
             for (i = 0; i < cend; ++i) {
-                fputc('N', fa_out);
+                fputc('N', fo);
                 if (++l % line_wd == 0)
-                    fputc('\n', fa_out);
+                    fputc('\n', fo);
             }
             continue;
         }
         if (!name) {
             name = strdup(sname);
-            fprintf(fa_out, ">%s\n", name);
+            fprintf(fo, ">%s\n", name);
             l = 0;
         }
         if (strcmp(sname, name)) {
             free(name);
             name = strdup(sname);
-            fprintf(fa_out, "\n>%s\n", name);
+            if (l % line_wd != 0)
+                fputc('\n', fo);
+            fprintf(fo, ">%s\n", name);
             l = 0;
         }
 
@@ -493,27 +490,61 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, const char *out,
             exit(EXIT_FAILURE);
         }
         s = dict->s[c];
-        if (strncmp(oris, "+", 1)) {
+        if (strncmp(oris, "-", 1)) {
             // forward
             for (i = cstart - 1; i < cend; ++i) {
-                fputc(s.seq[i], fa_out);
+                fputc(s.seq[i], fo);
                 if (++l % line_wd == 0)
-                    fputc('\n', fa_out);
+                    fputc('\n', fo);
             }
         } else {
             // reverse
             for (i = cend; i >= cstart; --i) {
-                fputc(comp_table[(int) s.seq[i - 1]], fa_out);
+                fputc(comp_table[(int) s.seq[i - 1]], fo);
                 if (++l % line_wd == 0)
-                    fputc('\n', fa_out);
+                    fputc('\n', fo);
             }       
         }
     }
-    fputc('\n', fa_out);
+    if (l % line_wd != 0)
+        fputc('\n', fo);
     free(name);
     free(dict);
 
     fclose(agp_in);
-    fclose(fa_out);
+}
+
+void write_segs_to_agp(sd_seg_t *segs, int n, sdict_t *sd, int s, FILE *fp)
+{
+    uint64_t len = 0;
+    sd_seg_t seg;
+    int i, t = 0;
+    for (i = 0; i < n; ++i) {
+        seg = segs[i];
+        fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%d\t%d\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
+        len += seg.y;
+        if (i != n - 1) {
+            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
+            len += GAP_SZ;
+        }
+    }
+}
+
+void write_sorted_agp(asm_dict_t *dict, FILE *fo)
+{
+    int i, j, s;
+    c_pair_t *c_pairs;
+    c_pairs = (c_pair_t *) malloc(dict->n * sizeof(c_pair_t));
+    for(i = 0; i < dict->n; ++i) {
+        c_pair_t pair = {dict->s[i].len, i};
+        c_pairs[i] = pair;
+    }
+    radix_sort_pair(c_pairs, c_pairs + dict->n);
+    s = 0;
+    for (i = dict->n - 1; i >= 0; --i) {
+        j = c_pairs[i].y;
+        write_segs_to_agp(dict->seg + dict->s[j].s, dict->s[j].n, dict->sdict, ++s, fo);
+    }
+    free(c_pairs);
 }
 

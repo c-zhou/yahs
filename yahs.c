@@ -190,6 +190,7 @@ int contig_error_break(char *fai, char *link_file, char *out)
     asm_dict_t *dict;
 
     int dist_thres = estimate_dist_thres_from_file(link_file, sdict, ec_min_frac, ec_resolution);
+    dist_thres = MIN(dist_thres, 1000000);
 #ifdef DEBUG_ERROR_BREAK
     printf("[I::%s] dist threshold for error break: %d\n", __func__, dist_thres);
 #endif
@@ -206,7 +207,7 @@ int contig_error_break(char *fai, char *link_file, char *out)
         bp_t *breaks = detect_break_points(link_mat, ec_bin, ec_merge_thresh, ec_fold_thresh, ec_dual_break_thresh, &bp_n);
         sprintf(out1, "%s_%02d.agp", out, ++ec_round);
         FILE *agp_out = fopen(out1, "w");
-        write_agp(dict, breaks, bp_n, agp_out);
+        write_break_agp(dict, breaks, bp_n, agp_out);
         fclose(agp_out);
         
         link_mat_destroy(link_mat);
@@ -247,7 +248,7 @@ int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, 
     int bp_n = 0;
     bp_t *breaks = detect_break_points_local_joint(link_mat, ec_bin, ec_fold_thresh, flank_size, dict, &bp_n);
     FILE *agp_out = fopen(out, "w");
-    write_agp(dict, breaks, bp_n, agp_out);
+    write_break_agp(dict, breaks, bp_n, agp_out);
     fclose(agp_out);
 
     link_mat_destroy(link_mat);
@@ -313,9 +314,23 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
             }
         }
     }
+
     sprintf(out_agp, "%s_scaffolds_final.agp", out);
-    file_copy(out_agp_break, out_agp);
-    
+    // output sorted agp by scaffold size instead of file copy
+    // file_copy(out_agp_break, out_agp);
+    sdict_t *sdict = make_sdict_from_index(fai);
+    asm_dict_t *dict = make_asm_dict_from_agp(sdict, out_agp_break);
+    FILE *fo;
+    fo = fopen(out_agp, "w");
+    if (fo == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out_agp);
+        exit(EXIT_FAILURE);
+    }
+    write_sorted_agp(dict, fo);
+    fclose(fo);
+    asm_destroy(dict);
+    sd_destroy(sdict);
+
     free(out_agp);
     free(out_fn);
     free(out_agp_break);
@@ -397,19 +412,19 @@ int main(int argc, char *argv[])
             agp = opt.arg;
         } else if (c == 'r') {
             restr = opt.arg;
-        } else if (c == 'v') {
-            VERBOSE = atoi(opt.arg);
-        } else if (c == 'h') {
-            fp_help = stdout;
         } else if (c == 'o') {
             out = opt.arg;
         } else if (c == 301) {
             no_contig_ec = 1;            
         } else if (c == 302) {
             no_scaffold_ec = 1;
+        } else if (c == 'v') {
+            VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
             puts(YAHS_VERSION);
             return 0;
+        } else if (c == 'h') {
+            fp_help = stdout;
         } else if (c == '?') {
             fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
@@ -504,7 +519,14 @@ int main(int argc, char *argv[])
         sprintf(agp_final, "%s_scaffolds_final.agp", out);
         sprintf(fa_final, "%s_scaffolds_final.fa", out);
         fprintf(stderr, "[I::%s] writing FASTA file for scaffolds\n", __func__);
-        write_fasta_file_from_agp(fa, agp_final, fa_final, 100);
+        FILE *fo;
+        fo = fopen(fa_final, "w");
+        if (fo == NULL) {
+            fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, fa_final);
+            exit(EXIT_FAILURE);
+        }
+        write_fasta_file_from_agp(fa, agp_final, fo, 60);
+        fclose(fo);
     }
 
     if (fai)

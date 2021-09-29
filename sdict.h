@@ -93,7 +93,9 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f);
 char *get_asm_seq(asm_dict_t *d, char *name);
 int32_t asm_sd_get(asm_dict_t *d, const char *name);
 int sd_coordinate_conversion(asm_dict_t *d, int32_t id, int pos, int *s, int *p);
-void write_fasta_file_from_agp(const char *fa, const char *agp, const char *out, int line_wd);
+void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd);
+void write_segs_to_agp(sd_seg_t *segs, int n, sdict_t *sd, int s, FILE *fp);
+void write_sorted_agp(asm_dict_t *dict, FILE *fo);
 
 #ifdef __cplusplus
 }

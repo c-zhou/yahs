@@ -58,7 +58,14 @@ int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, FILE *fo)
         for (i = 0; i < m; i += 4) {
             sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
             sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
-            fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+            if (i0 < 0 || i1 < 0) {
+                fprintf(stderr, "[W::%s] sequence not found \n", __func__);
+            } else {
+                if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                    fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                else
+                    fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+            }
         }
         pair_c += m / 4;
 
@@ -109,10 +116,14 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, FILE *fo)
 
                 sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
                 sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
-                if (i0 < 0 || i1 < 0)
+                if (i0 < 0 || i1 < 0) {
                     fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
-                else
-                    fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                } else {
+                    if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                        fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                    else
+                        fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+                }
                 buff = 0;
             } else {
                 strcpy(cname0, cname1);
@@ -197,10 +208,14 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
                 if (s0 > 0 && s1 > 0) {
                     sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
                     sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
-                    if (i0 < 0 || i1 < 0)
+                    if (i0 < 0 || i1 < 0) {
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
-                    else
-                        fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                    } else {
+                        if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                            fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                        else
+                            fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+                    }
                 }
                 free(rname0);
                 free(rname1);
@@ -240,7 +255,6 @@ static void print_help(FILE *fp_help)
 
 static ko_longopt_t long_options[] = {
     { "help",           ko_no_argument, 'h' },
-    { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
 };
 
@@ -261,10 +275,10 @@ int main(int argc, char *argv[])
     fai = agp = link_file = out = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
-        if (c == 'h') {
-            fp_help = stdout;
-        } else if (c == 'o') {
+        if (c == 'o') {
             out = opt.arg;
+        } else if (c == 'h') {
+            fp_help = stdout;
         } else if (c == '?') {
             fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
@@ -290,7 +304,7 @@ int main(int argc, char *argv[])
     fai = argv[opt.ind + 2];
 
     fo = out == 0? stdout : fopen(out, "w");
-    if (fo == NULL) {
+    if (fo == 0) {
         fprintf(stderr, "[E::%s] cannot open fail %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
