@@ -948,12 +948,12 @@ static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
 {
     int i;
     uint8_t c;
-	for (i = 0; i < n_cigar; ++i) {
-		c = cigar[i] & BAM_CIGAR_MASK;
-		if (c == BAM_CMATCH || c == BAM_CDEL)
+    for (i = 0; i < n_cigar; ++i) {
+        c = cigar[i] & BAM_CIGAR_MASK;
+        if (c == BAM_CMATCH || c == BAM_CDEL)
             s += cigar[i] >> BAM_CIGAR_SHIFT;
-	}
-	return s;
+    }
+    return s;
 }
 
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, int32_t *s, int32_t *e, char **cname)
@@ -975,18 +975,18 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
     bamFile fp;
     FILE *fo;
     bam_header_t *h;
-	bam1_t *b;
+    bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
     int32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
     long pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
 
-	fp = bam_open(f, "r"); // sorted by read name
-	if (fp == NULL) {
-		fprintf(stderr, "[E::%s] cannot open fail %s for reading\n", __func__, f);
-		exit(EXIT_FAILURE);
-	}
+    fp = bam_open(f, "r"); // sorted by read name
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open fail %s for reading\n", __func__, f);
+        exit(EXIT_FAILURE);
+    }
     
     fo = fopen(out, "w");
     if (fo == NULL) {
@@ -994,8 +994,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
         exit(EXIT_FAILURE);
     }
 
-	h = bam_header_read(fp);
-	b = bam_init1();
+    h = bam_header_read(fp);
+    b = bam_init1();
     cname0 = cname1 = rname0 = rname1 = 0;
 
     pair_c = inter_c = intra_c = buff = 0;
@@ -1053,8 +1053,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
     if (rname1)
         free(rname1);
     bam_destroy1(b);
-	bam_header_destroy(h);
-	bam_close(fp);
+    bam_header_destroy(h);
+    bam_close(fp);
     fclose(fo);
 
     fprintf(stderr, "[I::%s] dumped %ld read pairs: %ld intra links + %ld inter links \n", __func__, pair_c, intra_c, inter_c);

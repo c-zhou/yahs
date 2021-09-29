@@ -45,8 +45,8 @@ KDQ_INIT(uint32_t)
 graph_t *graph_init(void)
 {
     graph_t *g;
-	g = (graph_t *) calloc(1, sizeof(graph_t));
-	return g;
+    g = (graph_t *) calloc(1, sizeof(graph_t));
+    return g;
 }
 
 void graph_destroy(graph_t *g)
@@ -63,7 +63,7 @@ void graph_destroy(graph_t *g)
 void graph_print(const graph_t *g, FILE *fp, int no_seq)
 {
     uint32_t i, n;
-	uint64_t k;
+    uint64_t k;
     sd_aseq_t *s;
 
     n = g->sdict->n;
@@ -81,50 +81,50 @@ void graph_print(const graph_t *g, FILE *fp, int no_seq)
         } else {
             fputc('*', fp);
         }
-		fprintf(fp, "\tLN:i:%d", s->len);
-		fputc('\n', fp);
-	}
+        fprintf(fp, "\tLN:i:%d", s->len);
+        fputc('\n', fp);
+    }
     
     for (k = 0; k < g->n_arc; ++k) {
-		const graph_arc_t *a = &g->arc[k];
-		if (a->del || a->comp) 
+        const graph_arc_t *a = &g->arc[k];
+        if (a->del || a->comp) 
             continue;
         fprintf(fp, "L\t%s\t%c\t%s\t%c\t0M\tWT:f:%.6f", g->sdict->s[a->v>>1].name, "+-"[a->v&1], g->sdict->s[a->w>>1].name, "+-"[a->w&1], a->wt);
-		if (a->rank >= 0) 
+        if (a->rank >= 0) 
             fprintf(fp, "\tSR:i:%d", a->rank);
-		fputc('\n', fp);
-	}
+        fputc('\n', fp);
+    }
 }
 
 graph_arc_t *graph_add_arc(graph_t *g, uint32_t v, uint32_t w, int64_t link_id, int comp, double wt)
 {
     graph_arc_t *a;
-	if (g->m_arc == g->n_arc) {
-		uint64_t old_m = g->m_arc;
-		g->m_arc = g->m_arc? g->m_arc<<1 : 16;
-		g->arc = (graph_arc_t *) realloc(g->arc, g->m_arc * sizeof(graph_arc_t));
-		memset(&g->arc[old_m], 0, (g->m_arc - old_m) * sizeof(graph_arc_t));
-	}
-	a = &g->arc[g->n_arc++];
-	a->v = v;
-	a->w = w;
+    if (g->m_arc == g->n_arc) {
+        uint64_t old_m = g->m_arc;
+        g->m_arc = g->m_arc? g->m_arc<<1 : 16;
+        g->arc = (graph_arc_t *) realloc(g->arc, g->m_arc * sizeof(graph_arc_t));
+        memset(&g->arc[old_m], 0, (g->m_arc - old_m) * sizeof(graph_arc_t));
+    }
+    a = &g->arc[g->n_arc++];
+    a->v = v;
+    a->w = w;
     a->wt = wt;
     a->rank = -1;
-	a->link_id = link_id >= 0? link_id : g->n_arc - 1;
-	if (link_id >= 0) 
+    a->link_id = link_id >= 0? link_id : g->n_arc - 1;
+    if (link_id >= 0) 
         a->rank = g->arc[link_id].rank; // TODO: this is not always correct!
-	a->del = a->strong = 0;
-	a->comp = comp;
-	return a;
+    a->del = a->strong = 0;
+    a->comp = comp;
+    return a;
 }
 
 int graph_arc_is_sorted(const graph_t *g)
 {
     uint64_t e;
-	for (e = 1; e < g->n_arc; ++e)
-		if (g->arc[e-1].v > g->arc[e].v)
-			break;
-	return (e == g->n_arc);
+    for (e = 1; e < g->n_arc; ++e)
+        if (g->arc[e-1].v > g->arc[e].v)
+            break;
+    return (e == g->n_arc);
 }
 
 void graph_arc_sort(graph_t *g)
@@ -134,20 +134,20 @@ void graph_arc_sort(graph_t *g)
 
 uint64_t *graph_arc_index_core(size_t max_seq, size_t n, const graph_arc_t *a)
 {
-	size_t i, last;
-	uint64_t *idx;
-	idx = (uint64_t *) calloc(max_seq * 2, 8);
+    size_t i, last;
+    uint64_t *idx;
+    idx = (uint64_t *) calloc(max_seq * 2, 8);
     for (i = 1, last = 0; i <= n; ++i)
-		if (i == n || graph_arc_head(a[i - 1]) != graph_arc_head(a[i]))
-			idx[graph_arc_head(a[i - 1])] = (uint64_t) last<<32 | (i - last), last = i;
-	return idx;
+        if (i == n || graph_arc_head(a[i - 1]) != graph_arc_head(a[i]))
+            idx[graph_arc_head(a[i - 1])] = (uint64_t) last<<32 | (i - last), last = i;
+    return idx;
 }
 
 void graph_arc_index(graph_t *g)
 {
     if (g->idx) 
         free(g->idx);
-	g->idx = graph_arc_index_core(g->sdict->n, g->n_arc, g->arc);
+    g->idx = graph_arc_index_core(g->sdict->n, g->n_arc, g->arc);
 }
 
 graph_t *read_graph_from_gfa(char *gfa)

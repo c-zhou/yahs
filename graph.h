@@ -33,8 +33,8 @@
 #include "sdict.h"
 
 typedef struct {
-	uint32_t v, w; // vetex_id | ori
-	int32_t rank;
+    uint32_t v, w; // vetex_id | ori
+    int32_t rank;
     double wt;
     uint64_t link_id:61, strong:1, del:1, comp:1; // link_id: a pair of dual arcs are supposed to have the same link_id
 } graph_arc_t;
@@ -46,13 +46,13 @@ typedef struct {
 #define graph_n_vtx(g) ((g)->sdict->n)
 
 typedef struct {
-	// segments
-	uint32_t max_rank;
-	asm_dict_t *sdict;
-	// links
-	uint64_t m_arc, n_arc;
-	graph_arc_t *arc;
-	uint64_t *idx;
+    // segments
+    uint32_t max_rank;
+    asm_dict_t *sdict;
+    // links
+    uint64_t m_arc, n_arc;
+    graph_arc_t *arc;
+    uint64_t *idx;
 } graph_t;
 
 
@@ -92,10 +92,10 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out);
 
 static inline void graph_arc_del(graph_t *g, uint32_t v, uint32_t w, int del)
 {
-	uint32_t i, nv = graph_arc_n(g, v);
-	graph_arc_t *av = graph_arc_a(g, v);
-	for (i = 0; i < nv; ++i)
-		if (av[i].w == w) 
+    uint32_t i, nv = graph_arc_n(g, v);
+    graph_arc_t *av = graph_arc_a(g, v);
+    for (i = 0; i < nv; ++i)
+        if (av[i].w == w) 
             av[i].del = !!del;
 }
 
@@ -111,16 +111,16 @@ static inline graph_arc_t *graph_arc(graph_t *g, uint32_t v, uint32_t w)
 
 static inline void graph_vtx_del(graph_t *g, uint32_t s)
 {
-	uint32_t k;
-	for (k = 0; k < 2; ++k) {
-		uint32_t i, v = s<<1 | k;
-		uint32_t nv = graph_arc_n(g, v);
-		graph_arc_t *av = graph_arc_a(g, v);
-		for (i = 0; i < nv; ++i) {
-			av[i].del = 1;
-			graph_arc_del(g, av[i].w^1, v^1, 1);
-		}
-	}
+    uint32_t k;
+    for (k = 0; k < 2; ++k) {
+        uint32_t i, v = s<<1 | k;
+        uint32_t nv = graph_arc_n(g, v);
+        graph_arc_t *av = graph_arc_a(g, v);
+        for (i = 0; i < nv; ++i) {
+            av[i].del = 1;
+            graph_arc_del(g, av[i].w^1, v^1, 1);
+        }
+    }
 }
 
 static inline int graph_arc_del_existed(graph_t *g, graph_arc_t *a)
