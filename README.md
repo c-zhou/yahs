@@ -27,5 +27,31 @@ With `--no-contig-ec` option, you can skip the initial assembly error correction
 
 With `--no-scaffold-ec` option, YaHS will skip the scaffolding error check in each round. There will no `*_r[0-9]{2}_break.agp` AGP output files.
 
+## Generate HiC contact maps
+YaHS offers some auxiliary tools to help generating HiC contact maps for visualisation. A demo is provided in the bash script `scripts/run_yahs.sh`. To generate and visualise a HiC contact map, the following tools are required.
+
+* samtools: https://github.com/samtools/samtools
+* juicer_tools: https://github.com/aidenlab/juicer/wiki/Download
+* Juicebox: https://github.com/aidenlab/Juicebox
+
+The first step is to convert the HiC alignment file (BAM/BED/BIN) to a file required by `juicer_tools` using the tool `juicer_pre` provided by YaHS. To save time, BIN file is recommended which has already been generated in the scaffolding step. Here is an example bash command:
+
+    (juicer_pre hic-to-contigs.bin scaffolds_final.agp contigs.fa.fai | sort -k2,2d -k6,6d -T ./ --parallel=8 -S32G | awk 'NF' > alignments_sorted.txt.part) && (mv alignments_sorted.txt.part alignments_sorted.txt)
+
+The tool `juicer_pre` takes three positional parameters: the alignments of HiC reads to contigs, the scaffold AGP file and the contig FASTA index file. With `-o` option, it will write the results to a file. Here, the outputs are directed to `stdout` as we need a sorted (by scaffold names) file for `juicer_tools`.
+
+For sorting, we use 8 threads, 32Gb memory and the current directory for temporaries. You might need to adjust these settings according to your device.
+
+The next step is to generate HiC contact matrix using `juicer_tools`. Here is an example bash command:
+
+    (java -jar -Xmx32G juicer_tools_1.22.01.jar pre --threads 12 alignments_sorted.txt out.hic.part scaffolds_final.fa.fai) && (mv out.hic.part out.hic) && (rm alignments_sorted.txt)
+
+The `juicer_tools`'s `pre` command takes three positional parameters: the sorted alignment file generated in the first step, the output file name and the scaffold FASTA index file. 
+
+Finally, the output file `out.hic` could be used for visualisation with Juicebox. More information about `juicer_tools` and Juicebox can be found [here]( https://github.com/aidenlab/juicer/wiki/Juicer-Tools-Quick-Start).
+
+## Other tools
+* ***agp_to_fasta*** creates a FASTA file from a AGP file. It takes two positional parameters: the AGP file and the contig FASTA file. By default, the output will be directed to `stdout`. You can write to a file with `-o` option. It also allows changing the FASTA line width with `-l` option, which by default is 60. 
+
 ## Limitations
 YaHS is still under development and only tested with genome assemblies limited to a few species. You are welcomed to use it and report failures. Any suggestions would be appreciated.
