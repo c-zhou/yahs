@@ -44,9 +44,9 @@ For sorting, we use 8 threads, 32Gb memory and the current directory for tempora
 
 The next step is to generate HiC contact matrix using `juicer_tools`. Here is an example bash command:
 
-    (java -jar -Xmx32G juicer_tools_1.22.01.jar pre --threads 12 alignments_sorted.txt out.hic.part scaffolds_final.fa.fai) && (mv out.hic.part out.hic) && (rm alignments_sorted.txt)
+    (java -jar -Xmx32G juicer_tools_1.22.01.jar pre --threads 12 alignments_sorted.txt out.hic.part scaffolds_final.chrom.sizes) && (mv out.hic.part out.hic) && (rm alignments_sorted.txt)
 
-The `juicer_tools`'s `pre` command takes three positional parameters: the sorted alignment file generated in the first step, the output file name and the scaffold FASTA index file. 
+The `juicer_tools`'s `pre` command takes three positional parameters: the sorted alignment file generated in the first step, the output file name and the file for scaffold sizes. The file for scaffold sizes should contain two columns - scaffold name and scaffold size, which can be taken from the first two columns of the FASTA index file.
 
 Finally, the output file `out.hic` could be used for visualisation with Juicebox. More information about `juicer_tools` and Juicebox can be found [here]( https://github.com/aidenlab/juicer/wiki/Juicer-Tools-Quick-Start).
 
