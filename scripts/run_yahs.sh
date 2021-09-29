@@ -28,5 +28,6 @@ if [ ${noplot} -ne 0 ]; then exit 0; fi
 
 ## do juicer hic map
 ${samtools} faidx ${outdir}/${out}_scaffolds_final.fa
-(${juicer_tools} ${outdir}/alignments_sorted.txt ${outdir}/${out}.hic.part ${outdir}/${out}_scaffolds_final.fa.fai) && (mv ${outdir}/${out}.hic.part ${outdir}/${out}.hic) && (rm ${outdir}/alignments_sorted.txt)
+cut -f1-2 ${outdir}/${out}_scaffolds_final.fa.fai >${outdir}/${out}_scaffolds_final.chrom.sizes
+(${juicer_tools} ${outdir}/alignments_sorted.txt ${outdir}/${out}.hic.part ${outdir}/${out}_scaffolds_final.chrom.sizes) && (mv ${outdir}/${out}.hic.part ${outdir}/${out}.hic) && (rm ${outdir}/alignments_sorted.txt)
 
