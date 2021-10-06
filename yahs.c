@@ -190,7 +190,7 @@ int contig_error_break(char *fai, char *link_file, char *out)
     asm_dict_t *dict;
 
     int dist_thres = estimate_dist_thres_from_file(link_file, sdict, ec_min_frac, ec_resolution);
-    dist_thres = MIN(dist_thres, 1000000);
+    dist_thres = MAX(dist_thres, 1000000);
 #ifdef DEBUG_ERROR_BREAK
     printf("[I::%s] dist threshold for error break: %d\n", __func__, dist_thres);
 #endif
