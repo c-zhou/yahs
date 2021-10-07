@@ -43,7 +43,7 @@
 #undef DEBUG_GRAPH_PRUNE
 #undef DEBUG_OPTIONS
 
-#define YAHS_VERSION "1.0-rc.3"
+#define YAHS_VERSION "1.0"
 
 static int ec_resolution = 10000;
 static int ec_bin = 1000;
