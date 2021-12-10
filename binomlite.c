@@ -644,10 +644,10 @@ static double brcmp1(int mu, double a, double b, double x, double y, int give_lo
     // else:               algorithm for    a0 < 1 < b0 < 8
     // L60:
     u = gamln1(a0);
-    int n = (int)(b0 - 1.);
+    int i, n = (int)(b0 - 1.);
     if (n >= 1) {
         c = 1.;
-        for (int i = 1; i <= n; ++i) {
+        for (i = 1; i <= n; ++i) {
         b0 += -1.;
         c *= b0 / (a0 + b0);
         /* L61: */
@@ -781,7 +781,8 @@ static void bgrat(double a, double b, double x, double y, double *w,
     j = q_r,
     sum = j,
     t = 1., cn = 1., n2 = 0.;
-    for (int n = 1; n <= n_terms_bgrat; ++n) {
+    int n;
+    for (n = 1; n <= n_terms_bgrat; ++n) {
     double bp2n = b + n2;
     j = (bp2n * (bp2n + 1.) * j + (z + bp2n + 1.) * t) * v;
     n2 += 2.;
@@ -792,7 +793,8 @@ static void bgrat(double a, double b, double x, double y, double *w,
     double s = 0.;
     if (n > 1) {
         double coef = b - n;
-        for (int i = 1; i <= nm1; ++i) {
+        int i;
+        for (i = 1; i <= nm1; ++i) {
         s += coef * c[i - 1] * d[nm1 - i];
         coef += b;
         }
@@ -973,19 +975,21 @@ static double basym(double a, double b, double lambda, double eps, int log_p)
     w = w0,
     znm1 = z,
     zn = z2;
-    for (int n = 2; n <= num_IT; n += 2) {
+    int n;
+    for (n = 2; n <= num_IT; n += 2) {
     hn *= h2;
     a0[n - 1] = r0 * 2. * (h * hn + 1.) / (n + 2.);
     int np1 = n + 1;
     s += hn;
     a0[np1 - 1] = r1 * 2. * s / (n + 3.);
-
-    for (int i = n; i <= np1; ++i) {
+    
+    int i, j, m;
+    for (i = n; i <= np1; ++i) {
         double r = (i + 1.) * -0.5;
         b0[0] = r * a0[0];
-        for (int m = 2; m <= i; ++m) {
+        for (m = 2; m <= i; ++m) {
         double bsum = 0.;
-        for (int j = 1; j <= m-1; ++j) {
+        for (j = 1; j <= m-1; ++j) {
             int mmj = m - j;
             bsum += (j * r - mmj) * a0[j - 1] * b0[mmj - 1];
         }
@@ -994,7 +998,7 @@ static double basym(double a, double b, double lambda, double eps, int log_p)
         c[i - 1] = b0[i - 1] / (i + 1.);
 
         double dsum = 0.;
-        for (int j = 1; j <= i-1; ++j) {
+        for (j = 1; j <= i-1; ++j) {
         dsum += d[i - j - 1] * c[j - 1];
         }
         d[i - 1] = -(dsum + c[i - 1]);
@@ -1653,7 +1657,8 @@ static double betaln(double a0, double b0)
     if (b <= 1e3) {
         int n = (int)(a - 1.);
         w = 1.;
-        for (int i = 1; i <= n; ++i) {
+        int i;
+        for (i = 1; i <= n; ++i) {
         a += -1.;
         double h = a / b;
         w *= h / (h + 1.);
@@ -1668,16 +1673,16 @@ static double betaln(double a0, double b0)
         //     1 < A <= B < 8 :  reduction of B
         n = (int)(b - 1.);
         double z = 1.;
-        for (int i = 1; i <= n; ++i) {
+        for (i = 1; i <= n; ++i) {
         b += -1.;
         z *= b / (a + b);
         }
         return w + log(z) + (gamln(a) + (gamln(b) - gsumln(a, b)));
     }
     else { // L50:    reduction of A when  B > 1000
-        int n = (int)(a - 1.);
+        int i, n = (int)(a - 1.);
         w = 1.;
-        for (int i = 1; i <= n; ++i) {
+        for (i = 1; i <= n; ++i) {
         a += -1.;
         w *= a / (a / b + 1.);
         }

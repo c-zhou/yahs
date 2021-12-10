@@ -624,7 +624,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, fa_final);
             exit(EXIT_FAILURE);
         }
-        write_fasta_file_from_agp(fa, agp_final, fo, 60);
+        // write_fasta_file_from_agp(fa, agp_final, fo, 60);
         fclose(fo);
     }
 
