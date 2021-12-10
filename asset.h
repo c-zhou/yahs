@@ -44,6 +44,7 @@ extern "C" {
 double realtime(void);
 double cputime(void);
 long peakrss(void);
+long aslimit(void);
 int file_copy(char *fin, char *fout);
 int8_t is_read_pair(const char *rname0, const char *rname1);
 

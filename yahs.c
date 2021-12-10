@@ -42,8 +42,13 @@
 #undef DEBUG_ERROR_BREAK
 #undef DEBUG_GRAPH_PRUNE
 #undef DEBUG_OPTIONS
+#undef DEBUG_RAM_USAGE
+#undef DEBUG_QLF
 
-#define YAHS_VERSION "1.0"
+#define YAHS_VERSION "1.1"
+
+#define ENOMEM_ERR 15
+#define ENOBND_ERR 14
 
 static int ec_resolution = 10000;
 static int ec_bin = 1000;
@@ -51,15 +56,17 @@ static int ec_move_avg = 0;
 static int ec_merge_thresh = 10000;
 static int ec_dual_break_thresh = 50000;
 static double ec_min_frac = 0.80;
-static double ec_fold_thresh = 0.1;
+static double ec_fold_thresh = 0.2;
+
+double qbinom(double, double, double, int, int);
 
 int VERBOSE = 0;
 
-graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, double min_norm)
+graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, double min_norm, double la)
 {
     int32_t i, j, n, c0, c1;
     int8_t t;
-    double norm;
+    double norm, qla;
     inter_link_t *link;
     graph_t *g;
     graph_arc_t *arc;
@@ -78,12 +85,19 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
         t = link->linkt;
         if (!t)
             continue;
-
+        
+        qla = qbinom(0.99, link->n0, la, 1, 0) / link->n0;
         for (j = 0; j < 4; ++j) {
             if (1 << j & t) {
                 norm = link->norms[j];
                 if (norm >= min_norm) {
-                    arc = graph_add_arc(g, c0<<1|j>>1, c1<<1|j&1, -1, 0, norm);
+                    if (norm < qla) {
+#ifdef DEBUG_QLF
+                        printf("#Edge rejected by QL filter: %s %s %u %u %.3f (< %.3f)\n", dict->s[c0].name, dict->s[c1].name, j, link->n0, norm, qla);
+#endif
+                        continue;
+                    }
+                    arc = graph_add_arc(g, c0<<1|j>>1, c1<<1|(j&1), -1, 0, norm);
                     graph_add_arc(g, c1<<1|!(j&1), c0<<1|!(j>>1), arc->link_id, 0, norm);
                 }
             }
@@ -96,7 +110,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolution)
+int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolution, double *noise)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai);
@@ -106,35 +120,69 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     long len = 0;
     for (i = 0; i < dict->n; ++i)
         len += dict->s[i].len;
-
 #ifdef DEBUG_GRAPH_PRUNE
     printf("[I::%s] #sequences loaded %d = %ldbp\n", __func__, dict->n, len);
 #endif
 
-    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, resolution, 0);
+    long rss_limit, rss_intra, rss_inter;
+    rss_limit = aslimit();
+#ifdef DEBUG_RAM_USAGE
+    printf("[I::%s] RAM limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
+#endif
+    rss_intra = estimate_intra_link_mat_init_rss(dict, resolution);
+    if (rss_limit >= 0 && rss_intra > rss_limit) {
+        // no enough memory
+        fprintf(stderr, "[I::%s] No enough memory. Trying higher resolutions... End of scaffolding round.\n", __func__);
+        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
+        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
+        asm_destroy(dict);
+        sd_destroy(sdict);
+        return ENOMEM_ERR;
+    }
+    rss_limit -= rss_intra;
+#ifdef DEBUG_RAM_USAGE
+    printf("[I::%s] RAM intra: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
+#endif
+    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, resolution, 1);
     norm_t *norm = calc_norms(intra_link_mat);
     if (norm == 0) {
-        fprintf(stderr, "[W::%s] no enough bands for norm calculation. Using scaffolds. \n", __func__);
+        fprintf(stderr, "[W::%s] No enough bands for norm calculation... End of scaffolding round.\n", __func__);
         intra_link_mat_destroy(intra_link_mat);
-        intra_link_mat = intra_link_mat_from_file(link_file, dict, resolution, 1);
-        norm = calc_norms(intra_link_mat);
-
-        if (norm == 0) {
-            intra_link_mat_destroy(intra_link_mat);
-            asm_destroy(dict);
-            sd_destroy(sdict);
-            return 1;
-        }
+        asm_destroy(dict);
+        sd_destroy(sdict);
+        return ENOBND_ERR;
     }
-
+    rss_inter = estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
+    if (rss_limit >= 0 && rss_inter > rss_limit) {
+        // no enough memory
+        fprintf(stderr, "[I::%s] No enough memory. Trying higher resolutions... End of scaffolding round.\n", __func__);
+        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
+        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
+        asm_destroy(dict);
+        sd_destroy(sdict);
+        return ENOMEM_ERR;
+    }
+    rss_limit -= rss_inter;
+#ifdef DEBUG_RAM_USAGE
+    printf("[I::%s] RAM inter: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
+    printf("[I::%s] RAM  free: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
+#endif
     inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, resolution, norm->r);
-    inter_link_norms(inter_link_mat, norm, 0);
-    calc_link_directs(inter_link_mat, 0.1, dict);
+    *noise = inter_link_mat->noise / resolution / resolution;
 
-    graph_t *g = build_graph_from_links(inter_link_mat, dict, 0.01);
+    int8_t *directs = 0;
+    double la;
+    // directs = calc_link_directs_from_file(link_file, dict);
+    inter_link_norms(inter_link_mat, norm, 1, &la);
+    calc_link_directs(inter_link_mat, 0.1, dict, directs);
+    free(directs);
+
+    graph_t *g = build_graph_from_links(inter_link_mat, dict, 0.1, la);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] scaffolding graph\n", __func__);
+    printf("[I::%s] scaffolding graph (before pruning) in GV format\n", __func__);
+    graph_print_gv(g, stdout);
+    printf("[I::%s] scaffolding graph (before pruning) in GFA format\n", __func__);
     graph_print(g, stdout, 1);
 #endif
 
@@ -145,7 +193,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     int round = 0;
 #endif
     while (1) {
-        trim_graph_simple_filter(g, 0.1, 0.7, 0);
+        trim_graph_simple_filter(g, 0.1, 0.7, 0.1, 0);
         trim_graph_tips(g);
         trim_graph_blunts(g);
         trim_graph_repeats(g);
@@ -156,6 +204,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
         trim_graph_self_loops(g);
 #ifdef DEBUG_GRAPH_PRUNE
         printf("[I::%s] number edges after trimming round %d: %ld\n", __func__, ++round, g->n_arc);
+        graph_print_gv(g, stdout);
 #endif
         if (g->n_arc == n_arc)
             break;
@@ -165,9 +214,9 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     trim_graph_ambiguous_edges(g);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] scaffolding graph in GV format\n", __func__);
+    printf("[I::%s] scaffolding graph (after pruning) in GV format\n", __func__);
     graph_print_gv(g, stdout);
-    printf("[I::%s] scaffolding graph in GFA format\n", __func__);
+    printf("[I::%s] scaffolding graph (after pruning) in GFA format\n", __func__);
     graph_print(g, stdout, 1);
 #endif
 
@@ -185,22 +234,23 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
 
 int contig_error_break(char *fai, char *link_file, char *out)
 {
-    int i, ec_round, bp_n, err_no;
-    sdict_t *sdict = make_sdict_from_index(fai);
+    uint32_t i, ec_round, err_no, bp_n;
+    sdict_t *sdict;
     asm_dict_t *dict;
+    int dist_thres;
 
-    int dist_thres = estimate_dist_thres_from_file(link_file, sdict, ec_min_frac, ec_resolution);
+    sdict = make_sdict_from_index(fai);
+    dict = make_asm_dict_from_sdict(sdict);
+    dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
     dist_thres = MAX(dist_thres, 1000000);
-#ifdef DEBUG_ERROR_BREAK
-    printf("[I::%s] dist threshold for error break: %d\n", __func__, dist_thres);
-#endif
+    fprintf(stderr, "[I::%s] dist threshold for contig error break: %d\n", __func__, dist_thres);
     char* out1 = (char *) malloc(strlen(out) + 35);
     ec_round = err_no = 0;
     while (1) {
         dict = ec_round? make_asm_dict_from_agp(sdict, out1) : make_asm_dict_from_sdict(sdict);
-        link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, ec_move_avg);
+        link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg);
 #ifdef DEBUG_ERROR_BREAK
-        printf("[I::%s] ec_round %d link matrix\n", __func__, ec_round);
+        printf("[I::%s] ec_round %u link matrix\n", __func__, ec_round);
         print_link_mat(link_mat, dict, stdout);
 #endif
         bp_n = 0;
@@ -226,26 +276,29 @@ int contig_error_break(char *fai, char *link_file, char *out)
     sd_destroy(sdict);
     free(out1);
 
-    fprintf(stderr, "[I::%s] perforem %d round assembly error correction. Made %d breaks \n", __func__, ec_round, err_no);
+    fprintf(stderr, "[I::%s] performed %u round assembly error correction. Made %u breaks \n", __func__, ec_round, err_no);
 
     return ec_round;
 }
 
-int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, char *out)
+int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, double noise, char *out)
 {
+    int dist_thres;
     sdict_t *sdict = make_sdict_from_index(fai);
     asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp);
 
-    int dist_thres = flank_size * 2;
-    link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, ec_move_avg);
+    dist_thres = flank_size * 2;
+    //dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
+    //dist_thres = MAX(dist_thres, 1000000);
+    //fprintf(stderr, "[I::%s] dist threshold for scaffold error break: %d\n", __func__, dist_thres);
+    link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, noise, ec_move_avg);
 
 #ifdef DEBUG_ERROR_BREAK
-    printf("[I::%s] dist threshold for error break: %d\n", __func__, dist_thres);
     printf("[I::%s] link matrix\n", __func__);
     print_link_mat(link_mat, dict, stdout);
 #endif
 
-    int bp_n = 0;
+    uint32_t bp_n = 0;
     bp_t *breaks = detect_break_points_local_joint(link_mat, ec_bin, ec_fold_thresh, flank_size, dict, &bp_n);
     FILE *agp_out = fopen(out, "w");
     write_break_agp(dict, breaks, bp_n, agp_out);
@@ -281,17 +334,29 @@ static void make_agp_from_fai(char *fai, char *out)
 
 int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions, int nr, int no_contig_ec, int no_scaffold_ec)
 {
-    char *out_fn = (char *) malloc(strlen(out) + 35);
-    char *out_agp = (char *) malloc(strlen(out) + 35);
-    char *out_agp_break = (char *) malloc(strlen(out) + 35);
-    
-    int ec_round, re;
+    int ec_round, re, r, rc;
+    char *out_fn, *out_agp, *out_agp_break;
+    uint32_t *n_stats, *l_stats;
+    double noise;
+    FILE *fo;
+    sdict_t *sdict;
+    asm_dict_t *dict;
+
+    sdict = make_sdict_from_index(fai);
+    out_fn = (char *) malloc(strlen(out) + 35);
+    out_agp = (char *) malloc(strlen(out) + 35);
+    out_agp_break = (char *) malloc(strlen(out) + 35);
+
     if (agp == 0 && no_contig_ec == 0) {
         sprintf(out_agp_break, "%s_inital_break", out);
         ec_round = contig_error_break(fai, link_file, out_agp_break);
         sprintf(out_agp_break, "%s_inital_break_%02d.agp", out, ec_round);
     } else {
         if (agp != 0) {
+            if (strlen(agp) > strlen(out)) {
+                free(out_agp_break);
+                out_agp_break = (char *) malloc(strlen(agp) + 35);
+            }
             sprintf(out_agp_break, "%s", agp);
         } else {
             sprintf(out_agp_break, "%s_no_break.agp", out);
@@ -299,28 +364,53 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
         }
     }
 
-    int r = 0;
+    r = rc = 0;
+    n_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
+    l_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
     while (r++ < nr) {
         fprintf(stderr, "[I::%s] scaffolding round %d resolution = %d\n", __func__, r, resolutions[r - 1]);
+        
+        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        asm_sd_stats(dict, n_stats, l_stats);
+        if (n_stats[4] < resolutions[r - 1] * 10) {
+            if (rc) {
+                fprintf(stderr, "[I::%s] assembly N50 (%u) too small. End of scaffolding.\n", __func__, n_stats[4]);
+                break;    
+            } else {
+                fprintf(stderr, "[W::%s] assembly N50 (%u) too small. Scaffolding anyway...\n", __func__, n_stats[4]);
+                fprintf(stderr, "[W::%s] consider running with increased memory limit if there ws memory issue.\n", __func__);
+            }
+        }
+#ifdef DEBUG
+        int i;
+        printf("[I::%s] assembly stats:\n", __func__);
+        for (i = 0; i < 10; ++i)
+            printf("[I::%s] N%d: %u (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
+#else
+        fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
+        fprintf(stderr, "[I::%s] N%d: %u (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
+        fprintf(stderr, "[I::%s] N%d: %u (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
+#endif
+
         sprintf(out_fn, "%s_r%02d", out, r);
-        re = run_scaffolding(fai, out_agp_break, link_file, out_fn, resolutions[r - 1]);
+        // noise per unit
+        re = run_scaffolding(fai, out_agp_break, link_file, out_fn, resolutions[r - 1], &noise);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
                 sprintf(out_agp_break, "%s_r%02d_break.agp", out, r);
-                scaffold_error_break(fai, link_file, out_agp, resolutions[r - 1], out_agp_break);
+                scaffold_error_break(fai, link_file, out_agp, resolutions[r - 1], noise, out_agp_break);
             } else {
                 sprintf(out_agp_break, "%s", out_agp);
             }
+            ++rc;
         }
     }
 
     sprintf(out_agp, "%s_scaffolds_final.agp", out);
     // output sorted agp by scaffold size instead of file copy
     // file_copy(out_agp_break, out_agp);
-    sdict_t *sdict = make_sdict_from_index(fai);
-    asm_dict_t *dict = make_asm_dict_from_agp(sdict, out_agp_break);
-    FILE *fo;
+    dict = make_asm_dict_from_agp(sdict, out_agp_break);
     fo = fopen(out_agp, "w");
     if (fo == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out_agp);
@@ -329,17 +419,20 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     write_sorted_agp(dict, fo);
     fclose(fo);
     asm_destroy(dict);
+
     sd_destroy(sdict);
+
+    free(n_stats);
+    free(l_stats);
 
     free(out_agp);
     free(out_fn);
     free(out_agp_break);
 
     return 0;
-
 }
 
-static int default_resolutions[9] = {50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000};
+static int default_resolutions[13] = {10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000};
 
 static int default_nr(char *fai)
 {
@@ -352,15 +445,21 @@ static int default_nr(char *fai)
     sd_destroy(sdict);
     
     max_res = 0;
-    if (genome_size < 1000000000)
+    if (genome_size < 100000000)
+        max_res = 1000000;
+    else if (genome_size < 200000000)
         max_res = 2000000;
-    else if (genome_size < 2000000000)
+    else if (genome_size < 500000000)
         max_res = 5000000;
-    else if (genome_size < 5000000000)
+    else if (genome_size < 1000000000)
         max_res = 10000000;
-    else
+    else if (genome_size < 2000000000)
         max_res = 20000000;
-    
+    else if (genome_size < 5000000000)
+        max_res = 50000000;
+    else
+        max_res = 100000000;
+
     nr = 0;
     while (nr < sizeof(default_resolutions) / sizeof(int) && default_resolutions[nr] <= max_res)
         ++nr;
@@ -525,7 +624,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, fa_final);
             exit(EXIT_FAILURE);
         }
-        write_fasta_file_from_agp(fa, agp_final, fo, 60);
+        // write_fasta_file_from_agp(fa, agp_final, fo, 60);
         fclose(fo);
     }
 

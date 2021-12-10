@@ -35,36 +35,36 @@
 #define SQRT2_2 0.70710678118
 
 typedef struct {
-    int32_t s; // seq id
-    int32_t n; // link bin number
+    uint32_t s; // seq id
+    uint32_t n; // link bin number
     int64_t *link; // bin pos << 32 | link count 
 } link_t;
 
 typedef struct {
-    int32_t b; // bin size
-    int32_t n; // number seqs
+    uint32_t b; // bin size
+    uint32_t n; // number seqs
     link_t *link;
 } link_mat_t;
 
 typedef struct {
-    int32_t n, m, s; //s: seq id
-    int32_t *p;
+    uint32_t n, m, s; //s: seq id
+    uint32_t *p;
 } bp_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-link_t *link_init(int32_t s, int32_t n);
-link_mat_t *link_mat_init(asm_dict_t *dict, int32_t b);
-link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, int32_t dist_thres, int32_t resolution, int32_t move_avg);
-int estimate_dist_thres_from_file(const char *f, sdict_t *dict, double min_frac, int32_t resolution);
+link_t *link_init(uint32_t s, uint32_t n);
+link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b);
+link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_thres, uint32_t resolution, double noise, uint32_t move_avg);
+uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double min_frac, uint32_t resolution);
 void link_mat_destroy(link_mat_t *link_mat);
 void print_link_mat(link_mat_t *link_mat, asm_dict_t *dict, FILE *fp);
-bp_t *detect_break_points(link_mat_t *link_mat, int32_t bin_size, int32_t merge_size, double fold_thres, int32_t dual_break_thres, int *bp_n);
+bp_t *detect_break_points(link_mat_t *link_mat, uint32_t bin_size, uint32_t merge_size, double fold_thres, uint32_t dual_break_thres, uint32_t *bp_n);
 void print_break_point(bp_t *bp, asm_dict_t *dict, FILE *fp);
-bp_t *detect_break_points_local_joint(link_mat_t *link_mat, int32_t bin_size, double fold_thres, int32_t flank_size, asm_dict_t *dict, int *bp_n);
-void write_break_agp(asm_dict_t *d, bp_t *breaks, int32_t b_n, FILE *fp);
+bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, double fold_thres, uint32_t flank_size, asm_dict_t *dict, uint32_t *bp_n);
+void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp);
 
 #ifdef __cplusplus
 }

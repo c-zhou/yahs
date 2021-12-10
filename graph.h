@@ -74,7 +74,7 @@ graph_t *graph_print_gv_around_node(const graph_t *g, FILE *fp, uint32_t *v, int
 void graph_print_all_clusters(graph_t *g, FILE *fp);
 int graph_remove_multi_arcs(graph_t *g);
 int graph_add_symm_arcs(graph_t *g);
-int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff, int min_len);
+int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff_h, double min_diff_l, int min_len);
 int trim_graph_tips(graph_t *g);
 int trim_graph_blunts(graph_t *g);
 int trim_graph_repeats(graph_t *g);

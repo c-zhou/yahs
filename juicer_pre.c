@@ -42,8 +42,8 @@ int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, FILE *fo)
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
     FILE *fp;
-    int32_t i, i0, i1, p0, p1;
-    int32_t buffer[BUFF_SIZE], m;
+    uint32_t i, i0, i1, p0, p1;
+    uint32_t buffer[BUFF_SIZE], m;
     long pair_c;
 
     fp = fopen(f, "r");
@@ -54,17 +54,17 @@ int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, FILE *fo)
 
     pair_c = 0;
     while (1) {
-        m = fread(&buffer, sizeof(int32_t), BUFF_SIZE, fp);
+        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
             sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
             sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
-            if (i0 < 0 || i1 < 0) {
+            if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                 fprintf(stderr, "[W::%s] sequence not found \n", __func__);
             } else {
                 if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
-                    fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                    fprintf(fo, "0\t%s\t%u\t0\t1\t%s\t%u\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
                 else
-                    fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+                    fprintf(fo, "0\t%s\t%u\t1\t1\t%s\t%u\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
             }
         }
         pair_c += m / 4;
@@ -92,7 +92,7 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, FILE *fo)
     size_t ln = 0;
     ssize_t read;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
-    int32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
     long pair_c;
 
@@ -106,23 +106,23 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, FILE *fo)
     buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (buff == 0) {
-            sscanf(line, "%s %d %d %s", cname0, &s0, &e0, rname0);
+            sscanf(line, "%s %u %u %s", cname0, &s0, &e0, rname0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %d %d %s", cname1, &s1, &e1, rname1);
+            sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
             if (is_read_pair(rname0, rname1)) {
                 if (++pair_c % 1000000 == 0)
                     fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
 
-                sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
-                sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
-                if (i0 < 0 || i1 < 0) {
+                sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2, &i0, &p0);
+                sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2, &i1, &p1);
+                if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                     fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                 } else {
                     if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
-                        fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                        fprintf(fo, "0\t%s\t%u\t0\t1\t%s\t%u\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
                     else
-                        fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+                        fprintf(fo, "0\t%s\t%u\t1\t1\t%s\t%u\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
                 }
                 buff = 0;
             } else {
@@ -156,12 +156,12 @@ static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
     return s;
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, int32_t *s, int32_t *e, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e, char **cname)
 {
     *cname = h->target_name[b->core.tid];
     if (b->core.flag & 0x4 || b->core.flag & 0x400) {
-        *s = -1;
-        *e = -1;
+        *s = UINT32_MAX;
+        *e = UINT32_MAX;
     } else {
         *s = b->core.pos + 1;
         *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
@@ -179,7 +179,7 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
     bam_header_t *h;
     bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
-    int32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
     long pair_c;
 
@@ -205,16 +205,16 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
                 if (++pair_c % 1000000 == 0)
                     fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
 
-                if (s0 > 0 && s1 > 0) {
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
-                    if (i0 < 0 || i1 < 0) {
+                if (s0 != UINT32_MAX && s1 != UINT32_MAX) {
+                    sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2, &i0, &p0);
+                    sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2, &i1, &p1);
+                    if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                     } else {
                         if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
-                            fprintf(fo, "0\t%s\t%d\t0\t1\t%s\t%d\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
+                            fprintf(fo, "0\t%s\t%u\t0\t1\t%s\t%u\t1\n", dict->s[i0].name, p0, dict->s[i1].name, p1);
                         else
-                            fprintf(fo, "0\t%s\t%d\t1\t1\t%s\t%d\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
+                            fprintf(fo, "0\t%s\t%u\t1\t1\t%s\t%u\t0\n", dict->s[i1].name, p1, dict->s[i0].name, p0);
                     }
                 }
                 free(rname0);

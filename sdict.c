@@ -111,10 +111,10 @@ void asm_destroy(asm_dict_t *d)
     free(d);
 }
 
-int32_t sd_put(sdict_t *d, const char *name, uint32_t len)
+uint32_t sd_put(sdict_t *d, const char *name, uint32_t len)
 {
     if (!name)
-        return -1;
+        return UINT32_MAX;
     sdhash_t *h = d->h;
     khint_t k;
     int absent;
@@ -134,19 +134,19 @@ int32_t sd_put(sdict_t *d, const char *name, uint32_t len)
     return kh_val(h, k);
 }
 
-int32_t sd_put1(sdict_t *d, const char *name, const char *seq, uint32_t len)
+uint32_t sd_put1(sdict_t *d, const char *name, const char *seq, uint32_t len)
 {
-    int32_t k = sd_put(d, name, len);
+    uint32_t k = sd_put(d, name, len);
     d->s[k].seq = strdup(seq);
     return k;
 }
 
-int32_t sd_get(sdict_t *d, const char *name)
+uint32_t sd_get(sdict_t *d, const char *name)
 {
     sdhash_t *h = d->h;
     khint_t k;
     k = kh_get(sdict, h, name);
-    return k == kh_end(h)? -1 : kh_val(h, k);
+    return k == kh_end(h)? UINT32_MAX : kh_val(h, k);
 }
 
 void sd_hash(sdict_t *d)
@@ -181,6 +181,8 @@ sdict_t *make_sdict_from_fa(const char *f)
     
     sdict_t *d;
     d = sd_init();
+    // WARNING: might introduce bug here
+    // l is int type by definition in kseq.h
     while ((l = kseq_read(ks)) >= 0)
         sd_put1(d, ks->name.s, ks->seq.s, strlen(ks->seq.s));
 
@@ -198,7 +200,7 @@ sdict_t *make_sdict_from_index(const char *f)
     size_t ln = 0;
     ssize_t read;
     char name[4096];
-    int32_t len;
+    uint32_t len;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -209,11 +211,10 @@ sdict_t *make_sdict_from_index(const char *f)
     sdict_t *d;
     d = sd_init();
     while ((read = getline(&line, &ln, fp)) != -1) {
-        sscanf(line, "%s %d", name, &len);
+        sscanf(line, "%s %u", name, &len);
         sd_put(d, name, len);
     }
     fclose(fp);
-
     return d;
 }
 
@@ -224,7 +225,7 @@ sdict_t *make_sdict_from_gfa(const char *f)
     size_t ln = 0;
     ssize_t read;
     char name[4096], lens[4096];
-    int32_t len;
+    uint32_t len;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -237,7 +238,7 @@ sdict_t *make_sdict_from_gfa(const char *f)
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (line[0] == 'S') {
             sscanf(line, "%*s %s %*s %s", name, lens);
-            len = strtol(lens + 5, NULL, 10);
+            len = strtoul(lens + 5, NULL, 10);
             sd_put(d, name, len);
         }
     }
@@ -246,13 +247,15 @@ sdict_t *make_sdict_from_gfa(const char *f)
     return d;
 }
 
-int32_t asm_put(asm_dict_t *d, const char *name, uint32_t len, uint32_t n, uint32_t s)
+uint32_t asm_put(asm_dict_t *d, const char *name, uint32_t len, uint32_t n, uint32_t s)
 {
     if (!name) 
-        return -1;
-    sdhash_t *h = d->h;
+        return UINT32_MAX;
+    sdhash_t *h;
     khint_t k;
     int absent;
+
+    h = d->h;
     k = kh_put(sdict, h, name, &absent);
     if (absent) {
         sd_aseq_t *a;
@@ -270,12 +273,12 @@ int32_t asm_put(asm_dict_t *d, const char *name, uint32_t len, uint32_t n, uint3
     return kh_val(h, k);
 }
 
-int32_t asm_sd_get(asm_dict_t *d, const char *name)
+uint32_t asm_sd_get(asm_dict_t *d, const char *name)
 {
     sdhash_t *h = d->h;
     khint_t k;
     k = kh_get(sdict, h, name);
-    return k == kh_end(h)? -1 : kh_val(h, k);
+    return k == kh_end(h)? UINT32_MAX : kh_val(h, k);
 }
 
 static void seg_put(asm_dict_t *d, uint32_t s, uint32_t a, uint32_t c, uint32_t x, uint32_t y)
@@ -293,15 +296,14 @@ asm_dict_t *make_asm_dict_from_sdict(sdict_t *sdict)
     uint32_t i;
     asm_dict_t *d;
     d = asm_init(sdict);
-    d -> index = (uint64_t *) calloc(sdict->n, sizeof(uint64_t));
+    d->index = (uint64_t *) calloc(sdict->n, sizeof(uint64_t));
     uint32_t *a = d->a;
     for (i = 0; i < sdict->n; ++i) {
         asm_put(d, sdict->s[i].name, sdict->s[i].len, 1, i);
         seg_put(d, i, 0, i<<1, 0, sdict->s[i].len);
         a[i] = i;
-        d -> index[i] = (uint64_t) sdict->s[i].len << 32 | i;
+        d->index[i] = (uint64_t) sdict->s[i].len << 32 | i;
     }
-    d -> sdict = sdict;
     return d;
 }
 
@@ -312,7 +314,7 @@ KRADIX_SORT_INIT(pair, c_pair_t, pair_key, 8)
 
 void asm_index(asm_dict_t *d)
 {
-    uint32_t i, s, c, c1;
+    int32_t i, s, c, c1;
     sd_seg_t seg;
     uint64_t x, y;
     uint32_t *a;
@@ -333,9 +335,8 @@ void asm_index(asm_dict_t *d)
 
     radix_sort_pair(c_pairs, c_pairs + s);
     d->index = (uint64_t *) malloc(s * sizeof(uint64_t));
-
     a = d->a;
-    c1 = UINT32_MAX;
+    c1 = INT32_MAX;
     for (i = 0; i < s; ++i) {
         d->index[i] = c_pairs[i].y;
         c = c_pairs[i].x >> 32;
@@ -356,8 +357,8 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     ssize_t read;
     char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[4];
     char *name = NULL;
-    int cstart, cend;
-    uint32_t a, c, s, n, l;
+    uint32_t a, l, cstart, cend;
+    uint32_t c, s, n;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -367,7 +368,8 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
 
     asm_dict_t *d;
     d = asm_init(sdict);
-    a = s = n = 0;
+    a = 0;
+    s = n = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
         if (!strncmp(type, "N", 1))
@@ -380,10 +382,10 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
             n = 0;
             name = strdup(sname);
         }
-        cstart = strtol(cstarts, NULL, 10);
-        cend = strtol(cends, NULL, 10);
+        cstart = strtoul(cstarts, NULL, 10);
+        cend = strtoul(cends, NULL, 10);
         c = sd_get(sdict, cname);
-        if (c < 0)
+        if (c == UINT32_MAX)
             return 0;
         c <<= 1;
         if (strncmp(oris, "+", 1)) 
@@ -398,9 +400,9 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     d->sdict = sdict;
 #ifdef DEBUG
     for (int i = 0; i < s; ++i)
-        fprintf(stderr, "%d %d %d %d %d\n", d->seg[i].s, d->seg[i].a, d->seg[i].c, d->seg[i].x, d->seg[i].y);
+        fprintf(stderr, "%u %u %u %u %u\n", d->seg[i].s, d->seg[i].a, d->seg[i].c, d->seg[i].x, d->seg[i].y);
     for (int i = 0; i < d->n; ++i)
-        fprintf(stderr, "%s %d %d %d\n", d->s[i].name, d->s[i].len, d->s[i].n, d->s[i].s);
+        fprintf(stderr, "%s %u %u %u\n", d->s[i].name, d->s[i].len, d->s[i].n, d->s[i].s);
 #endif
     asm_index(d);
 
@@ -413,8 +415,12 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     return d;
 }
 
-int sd_coordinate_conversion(asm_dict_t *d, int32_t id, int pos, int *s, int *p)
+int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint32_t *p)
 {
+    if (id == UINT32_MAX) {
+        *s = UINT32_MAX;
+        return 1;
+    }
     uint32_t i;
     uint64_t *index = d->index;
     i = d->a[id];
@@ -424,6 +430,66 @@ int sd_coordinate_conversion(asm_dict_t *d, int32_t id, int pos, int *s, int *p)
     *s = seg.s;
     *p = seg.c & 1? seg.a + seg.x + seg.y - pos : seg.a + pos - seg.x;
     return 0;
+}
+
+int cmp_uint32_d (const void *a, const void *b) {
+    // decreasing order
+    uint32_t x, y;
+    x = *(uint32_t *) a;
+    y = *(uint32_t *) b;
+    return x == y? 0 : (x < y? 1 : -1);
+}
+
+static void nl_stats(uint32_t *s, uint32_t n, uint32_t *n_stats, uint32_t *l_stats)
+{
+    uint32_t i, j;
+    double b, a, bs;
+    
+    bs = 0;
+    for (i = 0; i < n; ++i)
+        bs += s[i];
+
+    qsort(s, n, sizeof(uint32_t), cmp_uint32_d);
+
+    b = 0;
+    j = 0;
+    a = 0.1 * (++j) * bs;
+    for (i = 0; i < n; ++i) {
+        b += s[i];
+        while (b >= a) {
+            l_stats[j - 1] = i + 1;
+            n_stats[j - 1] = s[i];
+            a = 0.1 * (++j) * bs;
+        }
+    }
+}
+
+void sd_stats(sdict_t *d, uint32_t *n_stats, uint32_t *l_stats)
+{
+    // n_stats and l_stats are of at least size 10
+    uint32_t i, n, *s;
+
+    n = d->n;
+    s = (uint32_t *) calloc(n, sizeof(uint32_t));
+    for (i = 0; i < n; ++i)
+        s[i] = d->s[i].len;
+    nl_stats(s, n, n_stats, l_stats);
+    
+    free(s);
+}
+
+void asm_sd_stats(asm_dict_t *d, uint32_t *n_stats, uint32_t *l_stats)
+{
+    // n_stats and l_stats are of at least size 10
+    uint32_t i, n, *s;
+    
+    n = d->n;
+    s = (uint32_t *) calloc(n, sizeof(uint32_t));
+    for (i = 0; i < n; ++i)
+        s[i] = d->s[i].len;
+    nl_stats(s, n, n_stats, l_stats);
+
+    free(s);
 }
 
 char comp_table[] = {
@@ -447,7 +513,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     ssize_t read;
     char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[4];
     char *name = NULL;
-    int i, c, l, cstart, cend;
+    uint32_t i, c, l, cstart, cend;
 
     agp_in = fopen(agp, "r");
     if (agp_in == NULL) {
@@ -460,7 +526,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     while ((read = getline(&line, &ln, agp_in)) != -1) {
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
         if (!strncmp(type, "N", 1)) {
-            cend = strtol(cname, NULL, 10);
+            cend = strtoul(cname, NULL, 10);
             for (i = 0; i < cend; ++i) {
                 fputc('N', fo);
                 if (++l % line_wd == 0)
@@ -482,10 +548,10 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
             l = 0;
         }
 
-        cstart = strtol(cstarts, NULL, 10);
-        cend = strtol(cends, NULL, 10);
+        cstart = strtoul(cstarts, NULL, 10);
+        cend = strtoul(cends, NULL, 10);
         c = sd_get(dict, cname);
-        if (c < 0) {
+        if (c == UINT32_MAX) {
             fprintf(stderr, "[E::%s] sequence %s not found\n", __func__, cname);
             exit(EXIT_FAILURE);
         }
@@ -514,17 +580,17 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     fclose(agp_in);
 }
 
-void write_segs_to_agp(sd_seg_t *segs, int n, sdict_t *sd, int s, FILE *fp)
+void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE *fp)
 {
     uint64_t len = 0;
     sd_seg_t seg;
-    int i, t = 0;
+    uint32_t i, t = 0;
     for (i = 0; i < n; ++i) {
         seg = segs[i];
-        fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%d\t%d\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
+        fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
         len += seg.y;
         if (i != n - 1) {
-            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
+            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
             len += GAP_SZ;
         }
     }
@@ -532,8 +598,10 @@ void write_segs_to_agp(sd_seg_t *segs, int n, sdict_t *sd, int s, FILE *fp)
 
 void write_sorted_agp(asm_dict_t *dict, FILE *fo)
 {
-    int i, j, s;
+    int i, j;
+    uint32_t s;
     c_pair_t *c_pairs;
+
     c_pairs = (c_pair_t *) malloc(dict->n * sizeof(c_pair_t));
     for(i = 0; i < dict->n; ++i) {
         c_pair_t pair = {dict->s[i].len, i};

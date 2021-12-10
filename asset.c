@@ -57,6 +57,16 @@ double realtime(void)
     return tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
+long aslimit(void)
+{
+    long as;
+    struct rlimit lim;
+    getrlimit(RLIMIT_RSS, &lim);
+    as = lim.rlim_cur;
+    getrlimit(RLIMIT_AS, &lim);
+    return MAX(as, (long) lim.rlim_cur);
+}
+
 int file_copy(char *fin, char *fout)
 {
     FILE *fptr1, *fptr2;

@@ -81,7 +81,7 @@ void graph_print(const graph_t *g, FILE *fp, int no_seq)
         } else {
             fputc('*', fp);
         }
-        fprintf(fp, "\tLN:i:%d", s->len);
+        fprintf(fp, "\tLN:i:%u", s->len);
         fputc('\n', fp);
     }
     
@@ -173,7 +173,7 @@ graph_t *read_graph_from_gfa(char *gfa)
         if (line[0] == 'L') {
             sscanf(line, "%*s %s %s %s %s %*s %s", c0, s0, c1, s1, wts);
             wt = strtof(wts + 5, NULL);
-            graph_add_arc(g, asm_sd_get(g->sdict, c0)<<1|s0[0]=='-', asm_sd_get(g->sdict, c1)<<1|s1[0]=='-', -1, 0, wt);
+            graph_add_arc(g, (asm_sd_get(g->sdict, c0)<<1) | (s0[0]=='-'), (asm_sd_get(g->sdict, c1)<<1) | (s1[0]=='-'), -1, 0, wt);
         }
     }
     fclose(fp);
@@ -202,7 +202,10 @@ void graph_clean(graph_t *g, int shear)
     printf("[I::%s] graph cleaned: #arcs %lu -> %ld\n", __func__, n_arc, n);
 #endif
     if (shear) {
-        uint64_t m_arc = g->m_arc, m = 16;
+        uint64_t m = 16;
+#ifdef DEBUG
+        uint64_t m_arc = g->m_arc;
+#endif
         while (m < n) 
             m <<= 1;
         g->arc = (graph_arc_t *) realloc(g->arc, m * sizeof(graph_arc_t));
@@ -371,10 +374,10 @@ void graph_print_all_clusters(graph_t *g, FILE *fp)
     free(visited);
 }
 
-int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff, int min_len)
+int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff_h, double min_diff_l, int min_len)
 {
-    uint32_t v, nv, na, n_del;
-    double mwt;
+    uint32_t v, nv, na, n_del, n_ma;
+    double mwt, smwt;
     graph_arc_t *av, *a;
     nv = graph_n_vtx(g);
     nv <<= 1;
@@ -393,16 +396,27 @@ int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff, int min
     for (v = 0; v < nv; ++v) {
         na = graph_arc_n(g, v);
         av = graph_arc_a(g, v);
-        mwt = 0;
-
-        for (a = av; a < av + na; ++a)
-            if (a->wt > mwt)
+        
+        mwt = smwt = 0;
+        n_ma = 0;
+        for (a = av; a < av + na; ++a) {
+            if (a->wt > mwt) {
+                smwt = mwt;
                 mwt = a->wt;
-        mwt *= min_diff;
+                n_ma = 1;
+            } else if (a->wt == mwt) {
+                ++n_ma;
+            } else if (a->wt > smwt) {
+                smwt = a->wt;
+            }
+        }
 
-        for (a = av; a < av + na; ++a)
-            if (a->wt < min_wt || a->wt < mwt)
-                n_del += graph_arc_del_existed(g, a);
+        for (a = av; a < av + na; ++a) {
+            if ((a->wt >= min_wt && a->wt >= mwt * min_diff_h) || 
+                    (a->wt < min_wt && a->wt == mwt && mwt * min_diff_l >= smwt && n_ma == 1))
+                continue;
+            n_del += graph_arc_del_existed(g, a);
+        }
     }
 
     graph_clean(g, 1);
@@ -412,6 +426,29 @@ int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff, int min
 #endif
 
     return n_del;
+}
+
+static int is_mwt(graph_t *g, uint32_t v, uint32_t w)
+{
+    int b;
+    uint32_t na;
+    double mwt;
+    graph_arc_t *a, *av;
+
+    na = graph_arc_n(g, v);
+    if (na == 0)
+        return 0;
+    av = graph_arc_a(g, v);
+    b = 0;
+    mwt = 0;
+    for (a = av; a < av + na; ++a) {
+        if (a->wt > mwt) {
+            mwt = a->wt;
+            if (a->w == w)
+                b = 1;
+        }
+    }
+    return b;
 }
 
 int trim_graph_tips(graph_t *g)
@@ -426,7 +463,7 @@ int trim_graph_tips(graph_t *g)
         if (graph_arc_n(g, v^1) != 1 || graph_arc_n(g, v) > 0)
             continue;
         av = graph_arc_a(g, v^1);
-        if (graph_arc_n(g, av->w^1) > 1)
+        if (graph_arc_n(g, av->w^1) > 1 && !is_mwt(g, av->w^1, v))
             n_del += graph_arc_del_existed(g, av);
     }
 
@@ -495,8 +532,8 @@ int trim_graph_repeats(graph_t *g)
         w1 = aw->w;
         w2 = (aw + 1)->w;
 
-        if (graph_arc(g, v1, w1) && graph_arc(g, v2, w2) ||
-                graph_arc(g, v1, w2) && graph_arc(g, v2, w1)) {
+        if ((graph_arc(g, v1, w1) && graph_arc(g, v2, w2)) ||
+                (graph_arc(g, v1, w2) && graph_arc(g, v2, w1))) {
             n_del += graph_arc_del_existed(g, av);
             n_del += graph_arc_del_existed(g, av + 1);
             n_del += graph_arc_del_existed(g, aw);
@@ -760,7 +797,7 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
                         }
                         for (k = 0; k < nseg; ++k) {
                             cseg = dict->seg[pst + step * k];
-                            fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%d\t%d\t%c\n", s, len + 1, len + cseg.y, ++t, sd->s[cseg.c >> 1].name, cseg.x + 1, cseg.x + cseg.y, "+-"[(cseg.c & 1) ^ ori]);
+                            fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + cseg.y, ++t, sd->s[cseg.c >> 1].name, cseg.x + 1, cseg.x + cseg.y, "+-"[(cseg.c & 1) ^ ori]);
                             len += cseg.y;
                             if (k != nseg - 1 || j != qs - 1) {
                                 fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);

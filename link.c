@@ -44,11 +44,11 @@
 #undef DEBUG_ORIEN
 
 static int USE_MEDIAN_NORM = 1;
-static int MAX_RADIUS = 100;
+static uint32_t MAX_RADIUS = 100;
 
 void intra_link_mat_destroy(intra_link_mat_t *link_mat)
 {
-    int i;
+    uint32_t i;
     for (i = 0; i < link_mat->n; ++i)
         if (link_mat->links[i].n)
             free(link_mat->links[i].link);
@@ -59,7 +59,7 @@ void intra_link_mat_destroy(intra_link_mat_t *link_mat)
 
 void inter_link_mat_destroy(inter_link_mat_t *link_mat)
 {
-    int i, j;
+    uint32_t i, j;
     for (i = 0; i < link_mat->n; ++i) {
         if (link_mat->links[i].n) {
             for (j = 0; j < 4; ++j) {
@@ -71,6 +71,11 @@ void inter_link_mat_destroy(inter_link_mat_t *link_mat)
     if (link_mat->links)
         free(link_mat->links);
     free(link_mat);
+}
+
+static inline uint32_t div_ceil(uint32_t x, uint32_t y)
+{
+    return 1 + ((MAX(x, 1) - 1) / y);
 }
 
 // index mapping (c0, c1) -> (i, j) -> (n * 2 - i - 3) * i / 2 + j - 1 
@@ -150,53 +155,56 @@ void inter_link_mat_destroy(inter_link_mat_t *link_mat)
 //     O o o o # #
 //          b1
 // 
-inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, int resolution, int radius)
+inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uint32_t radius)
 {
     inter_link_mat_t *link_mat;
     inter_link_t *link;
-    int32_t i, j, k, l, b0, b1, n, m, p;
+    uint32_t i, j, k, l, b0, b1, n, m, p, r2;
     double a0, a1, a;
 
     n = dict->n;
     m = n * (n - 1) / 2;
+    r2 = resolution * 2;
     link_mat = (inter_link_mat_t *) malloc(sizeof(inter_link_mat_t));
     link_mat->n = m;
     link_mat->r = radius;
     link_mat->links = (inter_link_t *) malloc(m * sizeof(inter_link_t));
 
     for (i = 0; i < n; ++i) {
-        if (dict->s[i].len < 2 * resolution) {
+        if (dict->s[i].len < r2) {
             for (j = i + 1; j < n; ++j)
                 link_mat->links[(n * 2 - i - 3) * i / 2 + j - 1].n = 0;
             continue;
         }
         
-        b0 = MIN(radius, ceil((double) dict->s[i].len / 2.0 / resolution));
+        b0 = MIN(radius, div_ceil(dict->s[i].len, r2));
         // relative edge length of the last cell
-        a0 = MIN(1.0, ((double) dict->s[i].len / 2.0 - (b0 - 1) * resolution) / resolution);
+        a0 = MIN(1.0, (dict->s[i].len / 2.0 - (b0 - 1) * resolution) / resolution);
         for (j = i + 1; j < n; ++j) {
             link = &link_mat->links[(n * 2 - i - 3) * i / 2 + j - 1];
-            if (dict->s[j].len < 2 * resolution) {
+            if (dict->s[j].len < r2) {
                 link->n = 0;
                 continue;
             }
             
-            b1 = MIN(radius, ceil((double) dict->s[j].len / 2.0 / resolution));
+            b1 = MIN(radius, div_ceil(dict->s[j].len, r2));
             // relative edge length of the last cell
-            a1 = MIN(1.0, ((double) dict->s[j].len / 2.0 - (b1 - 1) * resolution) / resolution);
+            a1 = MIN(1.0, (dict->s[j].len / 2.0 - (b1 - 1) * resolution) / resolution);
             p = b0 * b1; 
             link->c0 = i;
             link->c1 = j;
             link->b0 = b0;
             link->b1 = b1;
-            link->r = MIN(radius, b0 + b1 - 1);
+            link->r = MIN(radius, (uint32_t) (b0 + b1 - 1));
             link->n = p;
-            link->n0 = -1;
+            link->n0 = 0;
             link->linkt = 0;
+            
             for (k = 0; k < 4; ++k) {
                 link->link[k] = (double *) calloc(p, sizeof(double));
                 link->linkb[k] = (double *) calloc(link->r, sizeof(double));
             }
+
             // calculate relative areas for each cell 
             for (l = 0; l < p; ++l) {
                 a = 1.0;
@@ -212,15 +220,48 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, int resolution, int radi
             memset(link->norms, 0, sizeof(link->norms));
         }
     }
-
+    
     return link_mat;
 }
 
-intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, int resolution)
+long estimate_inter_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution, uint32_t radius)
+{
+    long bytes;
+    uint32_t i, j, b0, b1, n, m, p, r, r2;
+
+    n = dict->n;
+    m = n * (n - 1) / 2;
+    r2 = resolution * 2;
+
+    bytes = 0;
+    bytes += sizeof(inter_link_mat_t);
+    bytes += m * sizeof(inter_link_t);
+
+    for (i = 0; i < n; ++i) {
+        if (dict->s[i].len < r2)
+            continue;
+
+        b0 = MIN(radius, div_ceil(dict->s[i].len, r2));
+        for (j = i + 1; j < n; ++j) {
+            if (dict->s[j].len < r2)
+                continue;
+
+            b1 = MIN(radius, div_ceil(dict->s[j].len, r2));
+            p = b0 * b1;
+            r = MIN(radius, (uint32_t) (b0 + b1 - 1));
+
+            bytes += 4 * (p + r) * sizeof(double);
+        }
+    }
+
+    return bytes;
+}
+
+intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, uint32_t resolution)
 {
     intra_link_mat_t *link_mat;
     intra_link_t *link;
-    int32_t i, j, n, b, p;
+    uint32_t i, j, n, b, p;
     double a;
 
     n = dict->n;
@@ -235,7 +276,7 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, int resolution)
             link->n = 0;
             continue;
         }
-        b = ceil((double) dict->s[i].len / resolution);
+        b = div_ceil(dict->s[i].len, resolution);
         link->n = b;
         // relative edge length of the last cell
         a = ((double) dict->s[i].len - (b - 1) * resolution) / resolution;
@@ -260,11 +301,32 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, int resolution)
     return link_mat;
 }
 
-intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, int resolution)
+long estimate_intra_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution)
+{
+    long bytes;
+    uint32_t i, n, b, p;
+
+    n = dict->n;
+    
+    bytes = 0;
+    bytes += sizeof(intra_link_mat_t);
+    bytes += n * sizeof(intra_link_t);
+
+    for (i = 0; i < n; ++i) {
+        if (dict->s[i].len < resolution)
+            continue;
+        b = div_ceil(dict->s[i].len, resolution);
+        p = b * (b + 1) / 2;
+        bytes += p * sizeof(double);
+    }
+    return bytes;
+}
+
+intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, uint32_t resolution)
 {
     intra_link_mat_t *link_mat;
     intra_link_t *link;
-    int32_t i, j, n, b, p;
+    uint32_t i, j, n, b, p;
     double a;
 
     n = dict->n;
@@ -279,7 +341,7 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, int resolution)
             link->n = 0;
             continue;
         }
-        b = ceil((double) dict->s[i].len / resolution);
+        b = div_ceil(dict->s[i].len, resolution);
         link->n = b;
         // relative edge length of the last cell
         a = ((double) dict->s[i].len - (b - 1) * resolution) / resolution;
@@ -303,6 +365,28 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, int resolution)
 
     return link_mat;
 }
+
+long estimate_intra_link_mat_init_sdict_rss(sdict_t *dict, uint32_t resolution)
+{
+    long bytes;
+    uint32_t i, n, b, p;
+
+    n = dict->n;
+    
+    bytes = 0;
+    bytes += sizeof(intra_link_mat_t);
+    bytes += n * sizeof(intra_link_t);
+
+    for (i = 0; i < n; ++i) {
+        if (dict->s[i].len < resolution)
+            continue;
+        b = div_ceil(dict->s[i].len, resolution);
+        p = b * (b + 1) / 2;
+        bytes += p * sizeof(double);
+    }
+    return bytes;
+}
+
 
 static inline void normalise_by_size(double *l)
 {
@@ -332,10 +416,10 @@ static inline void normalise_by_size(double *l)
 // 22 (0,4) 19 (1,4) 15 (2,4) 10 (3,4) 4  (4,4)
 // 25 (0,5) 23 (1,5) 20 (2,5) 16 (3,5) 11 (4,5) 5  (5,5)
 // 27 (0,6) 26 (1,6) 24 (2,6) 21 (3,6) 17 (4,6) 12 (5,6) 6  (6,6)
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, int resolution, int use_gap_seq)
+intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, int use_gap_seq)
 {
-    int32_t i, j, n, i0, i1, b0, b1, p0, p1;
-    int32_t buffer[BUFF_SIZE], m;
+    uint32_t i, j, n, b0, b1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
     long pair_c, intra_c;
     intra_link_mat_t *link_mat;
     intra_link_t *link;
@@ -346,33 +430,33 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, int 
         return 0;
 
     link_mat = use_gap_seq? intra_link_mat_init(dict, resolution) : intra_link_mat_init_sdict(dict->sdict, resolution);
+
     pair_c = 0;
     intra_c = 0;
 
     while (1) {
-        m = fread(&buffer, sizeof(int32_t), BUFF_SIZE, fp);
+        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
             if (use_gap_seq) {
                 sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
                 sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
-                b0 = p0 / resolution;
-                b1 = p1 / resolution;
+                b0 = (MAX(p0, 1) - 1) / resolution;
+                b1 = (MAX(p1, 1) - 1) / resolution;
             } else {
                 i0 = buffer[i];
                 i1 = buffer[i + 2];
-                b0 = buffer[i + 1] / resolution;
-                b1 = buffer[i + 3] / resolution;
+                b0 = (MAX(buffer[i + 1], 1) - 1) / resolution;
+                b1 = (MAX(buffer[i + 3], 1) - 1) / resolution;
             }
 
             if (i0 == i1) {
                 ++intra_c;
                 link = &link_mat->links[i0];
-                n = link->n - 1;
-                if (n < 0)
-                    continue;
-                if (b0 > b1)
-                    SWAP(int, b0, b1);
-                link->link[(n * 2 - b1 + b0 -1) * (b1 - b0) / 2 + b1] += 1.0;
+                if (link->n) {
+                    if (b0 > b1)
+                        SWAP(uint32_t, b0, b1);
+                    link->link[(link->n * 2 - b1 + b0 - 3) * (b1 - b0) / 2 + b1] += 1.0;
+                }
             }
         }
         pair_c += m / 4;
@@ -402,11 +486,11 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, int 
     return link_mat;
 }
 
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int resolution, int radius)
+inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, uint32_t radius)
 {
-    int32_t i, j, n, k, i0, i1, b0, b1, p0, p1;
-    int32_t buffer[BUFF_SIZE], m;
-    double l0, l1, a;
+    uint32_t i, j, n, k, b0, b1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    double l0, l1, a, na[4], nc[4];
     long pair_c, inter_c, radius_c, noise_c;
     inter_link_mat_t *link_mat;
     inter_link_t *link;
@@ -418,10 +502,10 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int 
 
     n = dict->n;
     link_mat = inter_link_mat_init(dict, resolution, radius);
-    pair_c = inter_c = radius_c = noise_c = 0;
+    pair_c = inter_c = radius_c = 0;
 
     while (1) {
-        m = fread(&buffer, sizeof(int32_t), BUFF_SIZE, fp);
+        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
             sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
             sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
@@ -430,8 +514,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int 
                 ++inter_c;
                 
                 if (i0 > i1) {
-                    SWAP(int32_t, i0, i1);
-                    SWAP(int32_t, p0, p1);
+                    SWAP(uint32_t, i0, i1);
+                    SWAP(uint32_t, p0, p1);
                 }
 
                 link = &link_mat->links[(n * 2 - i0 - 3) * i0 / 2 + i1 - 1];
@@ -439,41 +523,39 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int 
                 if (link->n == 0)
                     continue;
 
-                ++noise_c;
-
                 l0 = dict->s[i0].len / 2.0;
                 l1 = dict->s[i1].len / 2.0;
                 
                 if (p0 >= l0 && p1 < l1) {
                     // i0(-) -> i1(+)
-                    b0 = (int) ((2 * l0 - p0) / resolution);
-                    b1 = (int) ((double) p1 / resolution);
+                    b0 = (uint32_t) ((2 * l0 - p0) / resolution);
+                    b1 = (uint32_t) ((double) p1 / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
-                        link->link[0][MAX(0, b0 - 1) * link->b1 + b1] += 1.0;
+                        link->link[0][(MAX(1, b0) - 1) * link->b1 + b1] += 1.0;
                         ++radius_c;
                     }
                 } else if(p0 >= l0 && p1 >= l1) {
                     // i0(-) -> i1(-)
-                    b0 = (int) ((2 * l0 - p0) / resolution);
-                    b1 = (int) ((2 * l1 - p1) / resolution);
+                    b0 = (uint32_t) ((2 * l0 - p0) / resolution);
+                    b1 = (uint32_t) ((2 * l1 - p1) / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
-                        link->link[1][MAX(0, b0 - 1) * link->b1 + b1] += 1.0;
+                        link->link[1][(MAX(1, b0) - 1) * link->b1 + b1] += 1.0;
                         ++radius_c;
                     }
                 } else if(p0 < l0 && p1 < l1) {
                     // i0(+) -> i1(+)
-                    b0 = (int) ((double) p0 / resolution);
-                    b1 = (int) ((double) p1 / resolution);
+                    b0 = (uint32_t) ((double) p0 / resolution);
+                    b1 = (uint32_t) ((double) p1 / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
-                        link->link[2][MAX(0, b0 - 1) * link->b1 + b1] += 1.0;
+                        link->link[2][(MAX(1, b0) - 1) * link->b1 + b1] += 1.0;
                         ++radius_c;
                     }
                 } else if(p0 < l0 && p1 >= l1) {
                     // i0(+) -> i1(-)
-                    b0 = (int) ((double) p0 / resolution);
-                    b1 = (int) ((2 * l1 - p1) / resolution);
+                    b0 = (uint32_t) ((double) p0 / resolution);
+                    b1 = (uint32_t) ((2 * l1 - p1) / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
-                        link->link[3][MAX(0, b0 - 1) * link->b1 + b1] += 1.0;
+                        link->link[3][(MAX(1, b0) - 1) * link->b1 + b1] += 1.0;
                         ++radius_c;
                     }
                 }
@@ -503,14 +585,26 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int 
     }
 
     // calculate noise level
-    a = 0.0;
+    noise_c = a = 0;
     for (i = 0; i < link_mat->n; ++i) {
+        memset(nc, 0, sizeof(nc));
+        memset(na, 0, sizeof(na));
         link = &link_mat->links[i];
-        if (link->n == 0)
-            continue;
-        l0 = (double) dict->s[link->c0].len / resolution;
-        l1 = (double) dict->s[link->c1].len / resolution;
-        a += l0 * l1;
+        for (j = 0; j < link->n; ++j) {
+            for (k = 0; k < 4; ++k) {
+                if (link->link[k][j] >= 0) {
+                    nc[k] += link->link[k][j];
+                    na[k] += 1.0;
+                }
+            }
+        }
+        
+        j = 0;
+        for (k = 1; k < 4; ++k)
+            if (nc[k] < nc[j])
+                j = k;
+        noise_c += nc[j];
+        a += na[j];
     }
     link_mat->noise = a > 0? noise_c / a : 0;
 #ifdef DEBUG
@@ -522,11 +616,11 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, int 
 
 void norm_destroy(norm_t *norm)
 {
-    int i;
+    //uint32_t i;
     free(norm->bs);
-    for (i = 0; i < norm->n; ++i)
-        free(norm->link[i]);
-    free(norm->link);
+    //for (i = 0; i < norm->n; ++i)
+    //    free(norm->link[i]);
+    //free(norm->link);
     free(norm->linkc);
     free(norm->norms);
     free(norm);
@@ -539,84 +633,81 @@ int dcmp (const void * a, const void * b) {
 
 norm_t *calc_norms(intra_link_mat_t *link_mat)
 {
-    int32_t i, j, n, b, r, r0;
-    int32_t *bs, *t;
-    double **link;
+    uint32_t i, j, n, b, r, r0, t;
+    uint32_t *bs;
     double intra_c, tmp_c;
-    double *norms, *intra_links, *linkc;
+    double *norms, *link, *linkc;
     norm_t *norm;
+    
     // find maximum numebr of bands
     n = 0;
     for (i = 0; i < link_mat->n; ++i)
         n = MAX(link_mat->links[i].n, n);
-    n -= 1; // do not use the last one as it might be an incomplete cell
-    if (n <= 0) {
-        fprintf(stderr, "[E::%s] no bands (%d) for norm calculation, try a higher resolution\n", __func__, n);
+    if (n <= 1) {
+        fprintf(stderr, "[E::%s] no bands for norm calculation, try a higher resolution\n", __func__);
         return 0;
     }
+    n -= 1; // do not use the last one as it might be an incomplete cell
     // calculate number of cells for each band
-    bs = (int32_t *) calloc(n, sizeof(int32_t));
+    bs = (uint32_t *) calloc(n, sizeof(uint32_t));
     for (i = 0; i < link_mat->n; ++i) {
-        b = link_mat->links[i].n - 1;
-        for (j = 0; j < b; ++j)
-            bs[j] += b - j;
+        if (link_mat->links[i].n) {
+            b = link_mat->links[i].n - 1;
+            for (j = 0; j < b; ++j)
+                bs[j] += b - j;
+        }
     }
 
     r0 = 0;
     while (bs[r0] >= 30) 
         ++r0;
-    if (r0 < 2) {
+    if (r0 < 10) {
         fprintf(stderr, "[E::%s] no enough bands (%d) for norm calculation, try a higher resolution\n", __func__, r0);
         free(bs);
         return 0;
     }
 
-    // initialise cells
-    link = (double **) malloc(n * sizeof(double *));
-    for (i = 0; i < n; ++i)
-        link[i] = (double *) malloc(bs[i] * sizeof(double));
-    // fill cells
-    t = (int32_t *) calloc(n, sizeof(int32_t));
-    for (i = 0; i < link_mat->n; ++i) {
-        b = link_mat->links[i].n;
-        intra_links = link_mat->links[i].link;
-        for (j = 0; j < b - 1; ++j) {
-            memcpy(link[j] + t[j], intra_links + (b * 2 - j - 1) * j / 2 + j, (b - 1 - j) * sizeof(double));
-            t[j] += b - 1 - j;
-        }
-    }
-    free(t);
     // caluclate links in each band and radius
+    // calculate norms - using median or mean?
+    norms = (double *) malloc(n * sizeof(double));
     linkc = (double *) malloc(n * sizeof(double));
     intra_c = 0.0;
     for (i = 0; i < n; ++i) {
-        intra_links = link[i];
+        link = (double *) malloc(bs[i] * sizeof(double));
+        t = 0;
+        for (j = 0; j < link_mat->n; ++j) {
+            b = link_mat->links[j].n;
+            if (b > i + 1) {
+                memcpy(link + t, link_mat->links[j].link + (b * 2 - i - 1) * i / 2 + i, (b - 1 - i) * sizeof(double));
+                t += b - 1 - i;
+            }
+        }
+
         tmp_c = 0.0;
         for (j = 0; j < bs[i]; ++j)
-            tmp_c += intra_links[j];
+            tmp_c += link[j];
         linkc[i] = tmp_c;
         intra_c += tmp_c;
+        
+        if (USE_MEDIAN_NORM) {
+            qsort(link, bs[i], sizeof(double), dcmp);
+            norms[i] = bs[i] & 1? link[bs[i] / 2] : (link[bs[i] / 2] + link[bs[i] / 2 - 1]) / 2;
+        } else {
+            norms[i] = MAX(linkc[i], 1.0) / bs[i];
+        }
+
+        free(link);
     }
+
     intra_c -= linkc[0];
     tmp_c = 0.0;
     for (r = 1; r < n; ++r) {
         tmp_c += linkc[r];
-        if (tmp_c / intra_c >= 0.95)
+        if (tmp_c / intra_c >= 0.99)
             break;
     }
     
     r = MIN(MIN(r, r0), MAX_RADIUS);
-    // calculate norms
-    // using median or mean?
-    norms = (double *) malloc(n * sizeof(double));
-    for (i = 0; i < n; ++i) {
-        if (USE_MEDIAN_NORM) {
-            qsort(link[i], bs[i], sizeof(double), dcmp);
-            norms[i] = bs[i] & 1? link[i][bs[i] / 2] : (link[i][bs[i] / 2] + link[i][bs[i] / 2 - 1]) / 2;
-        } else {
-            norms[i] = MAX(linkc[i], 1.0) / bs[i];
-        }
-    }
 
     if (USE_MEDIAN_NORM) {
         // adjust radius by norms
@@ -647,7 +738,7 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
     norm->n = n;
     norm->r = r;
     norm->bs = bs;
-    norm->link = link;
+    //norm->link = link;
     norm->linkc = linkc;
     norm->norms = norms;
     return norm;
@@ -655,58 +746,53 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
 
 void print_inter_link_norms(FILE *fp, inter_link_mat_t *link_mat, asm_dict_t *dict)
 {
-    int i, n;
+    uint32_t i, n;
     inter_link_t *link;
-    char *cname0, *cname1;
+
     n = link_mat->n;
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
-        if (link->n == 0)
-            continue;
-        cname0 = dict->s[link->c0].name;
-        cname1 = dict->s[link->c1].name;
-        fprintf(fp, "NORM: %s %s (%d) [%.3f %.3f %.3f %.3f]\n", cname0, cname1, link->n0, link->norms[0], link->norms[1], link->norms[2], link->norms[3]);
+        if (link->n)
+            fprintf(fp, "NORM: %s %s (%u) [%.3f %.3f %.3f %.3f]\n", dict->s[link->c0].name, dict->s[link->c1].name, link->n0, link->norms[0], link->norms[1], link->norms[2], link->norms[3]);
     }
 }
 
 void print_inter_link_bands(FILE *fp, inter_link_mat_t *link_mat, asm_dict_t *dict)
 {
-    int i, j, k, n;
+    uint32_t i, j, k, n;
     inter_link_t *link;
-    char *cname0, *cname1;
+    
     n = link_mat->n;
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
-        if (link->n == 0)
-            continue;
-        cname0 = dict->s[link->c0].name;
-        cname1 = dict->s[link->c1].name;
-        for (j = 0; j < 4; ++j) {
-            fprintf(fp, "BAND: %s%s %s%s (%d, %d) [%.3f]", cname0, j < 2? "-" : "+", cname1, j & 1? "-" : "+", link->n0, link->r, link->norms[j]);
-            for (k = 0; k < link->r; ++k)
-                fprintf(fp, " %.0f", link->linkb[j][k]);
-            fprintf(fp, "\n");
+        if (link->n) {
+            for (j = 0; j < 4; ++j) {
+                fprintf(fp, "BAND [%u %u]: %s%s %s%s (%u, %u) [%.3f]", i, j, dict->s[link->c0].name, j < 2? "-" : "+", dict->s[link->c1].name, j & 1? "-" : "+", link->n0, link->r, link->norms[j]);
+                for (k = 0; k < link->r; ++k)
+                    fprintf(fp, " %.0f", link->linkb[j][k]);
+                fprintf(fp, "\n");
+            }
         }
     }
 }
 
 double *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict)
 {
+    uint32_t i, j, n, c0, c1;
     double *max_norms;
     inter_link_t *link;
-    int i, j, n;
-    int32_t c0, c1;
+
     n = link_mat->n;
     max_norms = (double *) calloc(dict->n, sizeof(double));
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
-        if (link->n == 0)
-            continue;
-        c0 = link->c0;
-        c1 = link->c1;
-        for (j = 0; j < 4; ++j) {
-            max_norms[c0] = MAX(max_norms[c0], link->norms[j]);
-            max_norms[c1] = MAX(max_norms[c1], link->norms[j]);
+        if (link->n) {
+            c0 = link->c0;
+            c1 = link->c1;
+            for (j = 0; j < 4; ++j) {
+                max_norms[c0] = MAX(max_norms[c0], link->norms[j]);
+                max_norms[c1] = MAX(max_norms[c1], link->norms[j]);
+            }
         }
     }
     return max_norms;
@@ -714,10 +800,11 @@ double *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict)
 
 void print_norms(FILE *fp, norm_t *norm)
 {
-    int i, j, n;
-    int64_t link_count;
-    double *link;
-    link_count = 0;
+    uint32_t i/**, j, n**/;
+    //uint64_t link_count;
+    //double *link;
+
+    //link_count = 0;
 
     fprintf(fp, "norms:");
     for (i = 0; i < norm->n; ++i)
@@ -729,6 +816,7 @@ void print_norms(FILE *fp, norm_t *norm)
         fprintf(fp, " %.0f", norm->linkc[i]);
     fprintf(fp, "\n");
 
+    /***
     for (i = 0; i < norm->n; ++i) {
         fprintf(fp, "band %d:", i);
         n = norm->bs[i];
@@ -739,17 +827,19 @@ void print_norms(FILE *fp, norm_t *norm)
         }
         fprintf(fp, "\n");
     }
+    **/
 }
 
-static int estimate_noise(inter_link_mat_t *link_mat)
+int estimate_noise(inter_link_mat_t *link_mat)
 {
-    int32_t i, j, k, n, l;
+    uint32_t i, j, k, n;
     uint32_t bin, *hist;
     uint64_t total;
+    double l;
     inter_link_t *inter_link;
 
     bin = 4096;
-    hist = calloc(bin, sizeof(uint32_t));
+    hist = (uint32_t *) calloc(bin, sizeof(uint32_t));
     for (i = 0; i < link_mat->n; ++i) {
         inter_link = &link_mat->links[i];
         n = inter_link->n;
@@ -758,10 +848,7 @@ static int estimate_noise(inter_link_mat_t *link_mat)
                 l = inter_link->link[k][j];
                 if (l < 0.0) 
                     continue;
-                l = (uint64_t) l;
-                if (l >= bin)
-                    l = bin - 1;
-                ++hist[l];
+                ++hist[MIN(bin - 1, (int) l)];
             }
         }
     }
@@ -774,9 +861,8 @@ static int estimate_noise(inter_link_mat_t *link_mat)
     total >>= 1;
 
 #ifdef DEBUG_NOISE
-    for (i = 0; i < bin; ++i) {
-        printf("%d %d\n", i, hist[i]);
-    }
+    for (i = 0; i < bin; ++i)
+        printf("[I::%s] noise bin %d %d\n", __func__, i, hist[i]);
 #endif
 
     n = 0;
@@ -784,7 +870,7 @@ static int estimate_noise(inter_link_mat_t *link_mat)
         ++n;
         if (n == bin)
             break;
-        hist[n] += hist[n-1];
+        hist[n] += hist[n - 1];
     }
 
     if (n == 4096)
@@ -795,97 +881,229 @@ static int estimate_noise(inter_link_mat_t *link_mat)
     return n;
 }
 
-void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise)
+void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double *la)
 {
-    int32_t i, j, k, b, b1, r, n, n0;
+    uint32_t i, j, k, b, b1, r, n, n0;
+    uint32_t *fn;
+    int8_t bl;
     double l, *norms, *fr, noise;
-    int32_t *fn;
+    double c, c0, t;
     inter_link_t *inter_link;
 
     noise = 0.0;
-    if (use_estimated_noise)
+    if (use_estimated_noise) {
         // noise = estimate_noise(link_mat);
         noise = link_mat->noise;
+        fprintf(stderr, "[I::%s] using noise level %.3f\n", __func__, noise);
+    }
 
     r = link_mat->r;
     norms = (double *) malloc((r + 1) * sizeof(double));
     for (i = 0; i <= r; ++i)
         norms[i] = norm->norms[i] - noise;
-    
-    fr = (double *) malloc(4 * r * sizeof(double));
-    fn = (int32_t *) malloc(r * sizeof(int32_t));
 
+    /***
+    // no weighting
+    c = c0 = 0;
     for (i = 0; i < link_mat->n; ++i) {
         inter_link = &link_mat->links[i];
         n = inter_link->n;
         if (n == 0)
             continue;
+        r = inter_link->r;
         b1 = inter_link->b1;
         n0 = 0;
-        memset(fr, 0, 4 * r * sizeof(double));
-        memset(fn, 0, r * sizeof(int32_t));
+        for (j = 0; j < n; ++j) {
+            b = j / b1 + j % b1;
+            if (b < r) {
+                if (norms[b + 1] > 0) {
+                    bl = 0;
+                    for (k = 0; k < 4; ++k) {
+                        l = inter_link->link[k][j];
+                        if (l < 0.0)
+                            break;
+                        if (l >= norms[b + 1] + noise) {
+                            inter_link->norms[k] += 1.0;
+                            ++c0;
+                        }
+                        bl = 1;
+                    }
+                    if (bl)
+                        ++n0;
+                }
+            }
+        }
+        for (k = 0; k < 4; ++k)
+            inter_link->norms[k] /= n0;
+        inter_link->n0 = n0;
+        c += n0;
+    }
+    **/
+    
+    double c1 = 0;
+    c = c0 = 0;
+    for (i = 0; i < link_mat->n; ++i) {
+        inter_link = &link_mat->links[i];
+        n = inter_link->n;
+        if (n == 0)
+            continue;
+        r = inter_link->r;
+        b1 = inter_link->b1;
+
+        fr = (double *) calloc(4 * r, sizeof(double));
+        fn = (uint32_t *) calloc(r, sizeof(uint32_t));
 
         for (j = 0; j < n; ++j) {
             b = j / b1 + j % b1;
-            if (b < r && norms[b + 1] > 0) {
-                for (k = 0; k < 4; ++k) {
-                    l = inter_link->link[k][j];
-                    if(l < 0.0) 
-                        break;
-                    l = MAX(0.0, l - noise);
-                    fr[k * r + b] += MIN(1.0, l / norms[b + 1]);
+            if (b < r) {
+                if (norms[b + 1] > 0) {
+                    bl = 0;
+                    for (k = 0; k < 4; ++k) {
+                        l = inter_link->link[k][j];
+                        if(l < 0.0)
+                            break;
+                        l = MAX(0.0, l - noise);
+                        fr[k * r + b] += MIN(1.0, l / norms[b + 1]);
+                        bl = 1;
+                    }
+                    if (bl)
+                        ++fn[b];
                 }
-                if (l >= 0.0)
-                    ++fn[b];
             }
         }
+        if (fn[0] == 0)
+            goto loop_i_end;
 
         // cumsum
+        for (k = 0; k < 4; ++k)
+            inter_link->norms[k] = fr[k * r];
         for (b = 1; b < r; ++b) {
-            fn[b] += fn[b - 1];
-            for (k = 0; k < 4; ++k)
+            for (k = 0; k < 4; ++k) {
+                inter_link->norms[k] += fr[k * r + b] * fr[k * r + b - 1] / fn[b - 1];
                 fr[k * r + b] += fr[k * r + b - 1];
-        }
-        // calculate filling rate
-        for (b = 1; b < r; ++b)
-            if (fn[b])
-                for (k = 0; k < 4; ++k)
-                    fr[k * r + b] /= fn[b];
-        for (k = 0; k < 4; ++k)
-            fr[k * r] = 1.0;
-
-        for (j = 0; j < n; ++j) {
-            b = j / b1 + j % b1;
-            if (b < r && norms[b + 1] > 0) {
-                for (k = 0; k < 4; ++k) {
-                    l = inter_link->link[k][j];
-                    if(l < 0.0) 
-                        break;
-                    l = MAX(0.0, l - noise);
-                    inter_link->norms[k] += fr[k * r + b] * MIN(1.0, l / norms[b + 1]);
-                }
-                if (l >= 0.0)
-                    ++n0;
             }
+            fn[b] += fn[b - 1];
         }
 
-        for (k = 0; k < 4; ++k)
-            if (n0)
-                inter_link->norms[k] /= n0;
+        n0 = fn[r - 1];
+        t = 0;
+        for (k = 0; k < 4; ++k) {
+            if (inter_link->norms[k] > t)
+                t = inter_link->norms[k];
+            inter_link->norms[k] /= n0;
+        }
         inter_link->n0 = n0;
+        c += n0;
+        c1 += t;
+loop_i_end:
+        free(fr);
+        free(fn);
     }
-
-    free(fr);
-    free(fn);
+    
+    *la = c1 / c;
+    fprintf(stderr, "[I::%s] average link count: %.3f %.3f %.3f\n", __func__, c1, c, *la);
+    
     free(norms);
 }
 
-void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *sdict)
+int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
 {
-    int32_t i, j, k, n, b, b1, r, t, n_ma;
+    uint32_t i, j, n, na, k, b0, b1, b, ma, sma, n_ma;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint32_t *link, l;
+    int8_t *directs;
+    long pair_c, inter_c;
+    FILE *fp;
+
+    fp = fopen(f, "r");
+    if (fp == NULL)
+        return 0;
+
+    n = dict->n;
+    na = n * (n - 1) / 2;
+    link = (uint32_t *) calloc(na << 2, sizeof(uint32_t));
+    pair_c = inter_c = 0;
+
+    while (1) {
+        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
+        for (i = 0; i < m; i += 4) {
+            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
+            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+
+            if (i0 != i1) {
+                ++inter_c;
+
+                if (i0 > i1) {
+                    SWAP(uint32_t, i0, i1);
+                    SWAP(uint32_t, p0, p1);
+                }
+                b0 = !((double) p0 / dict->s[i0].len > 0.5);
+                b1 = !((double) p1 / dict->s[i1].len > 0.5);
+                b = (b0 << 1) | (!b1);
+                ++link[b * na + (n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1];
+            }
+        }
+        pair_c += m / 4;
+        if (m < BUFF_SIZE) {
+            if (ferror(fp))
+                return 0;
+            break;
+        }
+    }
+
+#ifdef DEBUG
+    printf("[I::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
+#endif
+    fclose(fp);
+    
+    i0 = asm_sd_get(dict, "scaffold_11");
+    i1 = asm_sd_get(dict, "scaffold_111");
+    if (i0 > i1)
+        SWAP(uint32_t, i0, i1);
+    j = (n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1;
+    printf("XXXXX: %u %u %u %u %u %u\n", dict->s[i0].len, dict->s[i1].len, link[j], link[na + j], link[na * 2 + j], link[na * 3 + j]);
+
+    directs = (int8_t *) malloc(na * sizeof(int8_t));
+    for (i = 0; i < na; ++i) {
+        ma = sma = n_ma = j = 0;
+        for (k = 0; k < 4; ++k) {
+            l = link[k * na + i];
+            if (l > ma) {
+                sma = ma;
+                ma = l;
+                n_ma = 1;
+                j = k;
+            } else if (l == ma) {
+                ++n_ma;
+            } else if (l > sma) {
+                sma = l;
+            }
+        }
+        
+        directs[i] = n_ma == 1 && ma * 0.9 > sma? j : -1;
+    }
+    free(link);
+#ifdef DEBUG_ORIEN
+    int8_t d;
+    for (i0 = 0; i0 < n; ++i0) {
+        for (i1 = i0 + 1; i1 < n; ++i1) {
+            d = directs[(n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1];
+            if (d >=0)
+                printf("[I::%s] #Oriens: %s %s %hhi \n", __func__, dict->s[i0].name, dict->s[i1].name, d);
+        }
+    }
+#endif
+    return directs;
+}
+
+void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *dict, int8_t *directs)
+{
+    uint32_t i, j, k, n, b, b0, b1, r, n_ma;
+    int8_t t;
     inter_link_t *inter_link;
     double area[4]; // area under the cumsum of linkb
     double ma, sma;
+    uint32_t max_b = UINT32_MAX;
 
     r = link_mat->r;
     for (i = 0; i < link_mat->n; ++i) {
@@ -893,10 +1111,11 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
         n = inter_link->n;
         if (n == 0)
             continue;
+        b0 = inter_link->b0;
         b1 = inter_link->b1;
         for (j = 0; j < n; ++j) {
             b = j / b1 + j % b1;
-            if (b < r)
+            if (b <= b0 && b <= b1 && b <= max_b && b < r)
                 for (k = 0; k < 4; ++k)
                     if (inter_link->link[k][j] > 0.0)
                         inter_link->linkb[k][b] += inter_link->link[k][j];
@@ -911,7 +1130,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
         memset(area, 0, sizeof(area));
         for (j = 0; j < r; ++j)
             for (k = 0; k < 4; ++k)
-                area[k] += inter_link->linkb[k][j] * (r - j);
+                area[k] += inter_link->linkb[k][j]; //* (r - j);
         // select the one with maximum cumsum area as linkt
         t = 0;
         ma = sma = 0;
@@ -928,7 +1147,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
                 sma = area[k];
             }
         }
-        if (n_ma == 1 && ma * 0.8 > sma) {
+        if (n_ma == 1 && ma * 0.9 > sma) {
             inter_link->linkt = 1 << t;
         } else {
             t = 0;
@@ -939,7 +1158,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
         }
 
 #ifdef DEBUG_ORIEN
-        printf("[I::%s] %d %.0f %.0f %d %d [%.3f %.3f %.3f %.3f] [%.0f  %.0f  %.0f  %.0f] %s %s\n", __func__, inter_link->linkt, ma, sma, inter_link->b0, inter_link->b1, inter_link->norms[0], inter_link->norms[1], inter_link->norms[2], inter_link->norms[3], area[0], area[1], area[2], area[3], sdict->s[inter_link->c0].name, sdict->s[inter_link->c1].name);
+        printf("[I::%s] %d %.0f %.0f %d %d [%.3f %.3f %.3f %.3f] [%.0f  %.0f  %.0f  %.0f] %s %s\n", __func__, inter_link->linkt, ma, sma, inter_link->b0, inter_link->b1, inter_link->norms[0], inter_link->norms[1], inter_link->norms[2], inter_link->norms[3], area[0], area[1], area[2], area[3], dict->s[inter_link->c0].name, dict->s[inter_link->c1].name);
 #endif
     }
 }
@@ -956,7 +1175,7 @@ static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
     return s;
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, int32_t *s, int32_t *e, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e, char **cname)
 {
     *cname = h->target_name[b->core.tid];
     if (b->core.flag & 0x4 || b->core.flag & 0x400) {
@@ -977,7 +1196,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
     bam_header_t *h;
     bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
-    int32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
     long pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
@@ -1013,7 +1232,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
                     i0 = sd_get(dict, cname0);
                     i1 = sd_get(dict, cname1);
 
-                    if (i0 < 0 || i1 < 0) {
+                    if (i0 == UINT32_MAX || i1 ==UINT32_MAX) {
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                     } else {
                         if (i0 == i1)
@@ -1067,7 +1286,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, const char *out)
     size_t ln = 0;
     ssize_t read;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
-    int32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
     long pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
@@ -1086,17 +1305,17 @@ void dump_links_from_bed_file(const char *f, const char *fai, const char *out)
     pair_c = inter_c = intra_c = buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (buff == 0) {
-            sscanf(line, "%s %d %d %s", cname0, &s0, &e0, rname0);
+            sscanf(line, "%s %u %u %s", cname0, &s0, &e0, rname0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %d %d %s", cname1, &s1, &e1, rname1);
+            sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
             if (is_read_pair(rname0, rname1)) {
                 if (++pair_c % 1000000 == 0)
                     fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
                 i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
 
-                if (i0 < 0 || i1 < 0) {
+                if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                     fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                 } else {
                     if (i0 == i1)
