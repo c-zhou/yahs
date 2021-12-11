@@ -45,7 +45,7 @@
 #undef DEBUG_RAM_USAGE
 #undef DEBUG_QLF
 
-#define YAHS_VERSION "1.1"
+#define YAHS_VERSION "1.1a"
 
 #define ENOMEM_ERR 15
 #define ENOBND_ERR 14
