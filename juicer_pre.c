@@ -82,7 +82,7 @@ int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, FILE *fo)
     return 0;
 }
 
-int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, FILE *fo)
+int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FILE *fo)
 {
     sdict_t *sdict = make_sdict_from_index(fai);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
@@ -144,7 +144,7 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, FILE *fo)
     return 0;
 }
 
-static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
+static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
 {
     int i;
     uint8_t c;
@@ -156,12 +156,13 @@ static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
     return s;
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
     *cname = h->target_name[b->core.tid];
-    if (b->core.flag & 0x4 || b->core.flag & 0x400) {
-        *s = UINT32_MAX;
-        *e = UINT32_MAX;
+    // 0x4 0x100 0x400 0x800
+    if (b->core.flag & 0xD04 || b->core.qual < q) {
+        *s = -1;
+        *e = -1;
     } else {
         *s = b->core.pos + 1;
         *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
@@ -170,7 +171,7 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e,
     return strdup(bam1_qname(b));
 }
 
-int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
+int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, FILE *fo)
 {
     sdict_t *sdict = make_sdict_from_index(fai);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
@@ -179,7 +180,8 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
     bam_header_t *h;
     bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
-    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    int32_t s0, s1, e0, e1;
+    uint32_t i0, i1, p0, p1;
     int8_t buff;
     long pair_c;
 
@@ -197,17 +199,18 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, FILE *fo)
     buff = 0;
     while (bam_read1(fp, b) >= 0 ) {
         if (buff == 0) {
-            rname0 = parse_bam_rec(b, h, &s0, &e0, &cname0);
+            rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
             ++buff;
         } else if (buff == 1) {
-            rname1 = parse_bam_rec(b, h, &s1, &e1, &cname1);
+            rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
             if (strcmp(rname0, rname1) == 0) {
                 if (++pair_c % 1000000 == 0)
                     fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
 
-                if (s0 != UINT32_MAX && s1 != UINT32_MAX) {
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2, &i0, &p0);
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2, &i1, &p1);
+                if (s0 >= 0 && s1 >0) {
+                    sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
+                    sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
+
                     if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                     } else {
@@ -250,6 +253,7 @@ static void print_help(FILE *fp_help)
 {
     fprintf(fp_help, "Usage: juicer_pre [options] <hic.bed>|<hic.bam>|<hic.bin> <scaffolds.agp> <contigs.fa.fai>\n");
     fprintf(fp_help, "Options:\n");
+    fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            output to file [stdout]\n");
 }
 
@@ -267,16 +271,20 @@ int main(int argc, char *argv[])
 
     FILE *fo;
     char *fai, *agp, *link_file, *out, *ext;
+    int mq;
 
-    const char *opt_str = "o:h";
+    const char *opt_str = "q:o:h";
     ketopt_t opt = KETOPT_INIT;
     int c, ret;
     FILE *fp_help = stderr;
     fai = agp = link_file = out = 0;
+    mq = 10;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'o') {
             out = opt.arg;
+        } else if (c == 'q') {
+            mq = atoi(opt.arg);
         } else if (c == 'h') {
             fp_help = stdout;
         } else if (c == '?') {
@@ -298,6 +306,14 @@ int main(int argc, char *argv[])
         print_help(stderr);
         return 1;
     }
+    
+    if (mq < 0 || mq > 255) {
+        fprintf(stderr, "[E::%s] invalid mapping quality threshold: %d\n", __func__, mq);
+        return 1;
+    }
+
+    uint8_t mq8;
+    mq8 = (uint8_t) mq;
 
     link_file = argv[opt.ind];
     agp = argv[opt.ind + 1];
@@ -312,10 +328,10 @@ int main(int argc, char *argv[])
     ext = link_file + strlen(link_file) - 4;
     if (strcmp(ext, ".bam") == 0) {
         fprintf(stderr, "[I::%s] make juicer pre input from bam file %s\n", __func__, link_file);
-        ret = make_juicer_pre_file_from_bam(link_file, agp, fai, fo);
+        ret = make_juicer_pre_file_from_bam(link_file, agp, fai, mq8, fo);
     } else if (strcmp(ext, ".bed") == 0) {
         fprintf(stderr, "[I::%s] make juicer pre input from bed file %s\n", __func__, link_file);
-        ret = make_juicer_pre_file_from_bed(link_file, agp, fai, fo);
+        ret = make_juicer_pre_file_from_bed(link_file, agp, fai, mq8, fo);
     } else if (strcmp(ext, ".bin") == 0) {
         fprintf(stderr, "[I::%s] make juicer pre input from bin file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bin(link_file, agp, fai, fo);

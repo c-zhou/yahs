@@ -1163,7 +1163,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
     }
 }
 
-static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
+static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
 {
     int i;
     uint8_t c;
@@ -1175,10 +1175,11 @@ static uint32_t get_target_end(uint32_t *cigar, int n_cigar, uint32_t s)
     return s;
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
     *cname = h->target_name[b->core.tid];
-    if (b->core.flag & 0x4 || b->core.flag & 0x400) {
+    // 0x4 0x100 0x400 0x800
+    if (b->core.flag & 0xD04 || b->core.qual < q) {
         *s = -1;
         *e = -1;
     } else {
@@ -1189,14 +1190,15 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint32_t *s, uint32_t *e,
     return strdup(bam1_qname(b));
 }
 
-void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
+void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const char *out)
 {
     bamFile fp;
     FILE *fo;
     bam_header_t *h;
     bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
-    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    int32_t s0, s1, e0, e1;
+    uint32_t i0, i1, p0, p1;
     int8_t buff;
     long pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
@@ -1220,10 +1222,10 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
     pair_c = inter_c = intra_c = buff = 0;
     while (bam_read1(fp, b) >= 0 ) {
         if (buff == 0) {
-            rname0 = parse_bam_rec(b, h, &s0, &e0, &cname0);
+            rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
             ++buff;
         } else if (buff == 1) {
-            rname1 = parse_bam_rec(b, h, &s1, &e1, &cname1);
+            rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
             if (strcmp(rname0, rname1) == 0) {
                 if (++pair_c % 1000000 == 0)
                     fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
@@ -1242,13 +1244,13 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
                         p0 = (s0 + e0) / 2;
                         p1 = (s1 + e1) / 2;
                         if (i0 > i1) {
-                            SWAP(int32_t, i0, i1);
-                            SWAP(int32_t, p0, p1);
+                            SWAP(uint32_t, i0, i1);
+                            SWAP(uint32_t, p0, p1);
                         }
-                        fwrite(&i0, sizeof(int32_t), 1, fo);
-                        fwrite(&p0, sizeof(int32_t), 1, fo);
-                        fwrite(&i1, sizeof(int32_t), 1, fo);
-                        fwrite(&p1, sizeof(int32_t), 1, fo);
+                        fwrite(&i0, sizeof(uint32_t), 1, fo);
+                        fwrite(&p0, sizeof(uint32_t), 1, fo);
+                        fwrite(&i1, sizeof(uint32_t), 1, fo);
+                        fwrite(&p1, sizeof(uint32_t), 1, fo);
                     }
                 }
                 free(rname0);
@@ -1279,7 +1281,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, const char *out)
     fprintf(stderr, "[I::%s] dumped %ld read pairs: %ld intra links + %ld inter links \n", __func__, pair_c, intra_c, inter_c);
 }
 
-void dump_links_from_bed_file(const char *f, const char *fai, const char *out)
+void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const char *out)
 {
     FILE *fp, *fo;
     char *line = NULL;
@@ -1325,13 +1327,13 @@ void dump_links_from_bed_file(const char *f, const char *fai, const char *out)
                     p0 = (s0 + e0) / 2;
                     p1 = (s1 + e1) / 2;
                     if (i0 > i1) {
-                        SWAP(int32_t, i0, i1);
-                        SWAP(int32_t, p0, p1);
+                        SWAP(uint32_t, i0, i1);
+                        SWAP(uint32_t, p0, p1);
                     }
-                    fwrite(&i0, sizeof(int32_t), 1, fo);
-                    fwrite(&p0, sizeof(int32_t), 1, fo);
-                    fwrite(&i1, sizeof(int32_t), 1, fo);
-                    fwrite(&p1, sizeof(int32_t), 1, fo);
+                    fwrite(&i0, sizeof(uint32_t), 1, fo);
+                    fwrite(&p0, sizeof(uint32_t), 1, fo);
+                    fwrite(&i1, sizeof(uint32_t), 1, fo);
+                    fwrite(&p1, sizeof(uint32_t), 1, fo);
                 }
                 buff = 0;
             } else {

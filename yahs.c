@@ -474,6 +474,7 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "    -a FILE           AGP file (for rescaffolding) [none]\n");
     fprintf(fp_help, "    -r INT[,INT,...]  list of resolutions in ascending order [automate]\n");
     fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");
+    fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -v INT            verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    --version         show version number\n");
 }
@@ -496,15 +497,17 @@ int main(int argc, char *argv[])
     char *fa, *fai, *agp, *link_file, *out, *restr, *ext, *link_bin_file, *agp_final, *fa_final;
     int *resolutions;
     int nr;
+    int mq;
     int no_contig_ec, no_scaffold_ec;
 
-    const char *opt_str = "a:r:o:Vv:h";
+    const char *opt_str = "a:r:o:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
 
     int c, ret;
     FILE *fp_help = stderr;
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
     no_contig_ec = no_scaffold_ec = 0;
+    mq = 10;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'a') {
@@ -513,6 +516,8 @@ int main(int argc, char *argv[])
             restr = opt.arg;
         } else if (c == 'o') {
             out = opt.arg;
+        } else if (c == 'q') {
+            mq = atoi(opt.arg);
         } else if (c == 301) {
             no_contig_ec = 1;            
         } else if (c == 302) {
@@ -543,6 +548,14 @@ int main(int argc, char *argv[])
         print_help(stderr);
         return 1;
     }
+
+    if (mq < 0 || mq > 255) {
+        fprintf(stderr, "[E::%s] invalid mapping quality threshold: %d\n", __func__, mq);
+        return 1;
+    }
+    
+    uint8_t mq8;
+    mq8 = (uint8_t) mq;
 
     fa = argv[opt.ind];
     link_file = argv[opt.ind + 1];
@@ -580,12 +593,12 @@ int main(int argc, char *argv[])
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bam_file(link_file, fai, link_bin_file);
+        dump_links_from_bam_file(link_file, fai, mq8, link_bin_file);
     } else if (strcmp(ext, ".bed") == 0) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bed_file(link_file, fai, link_bin_file);
+        dump_links_from_bed_file(link_file, fai, mq8, link_bin_file);
     } else if (strcmp(ext, ".bin") == 0) {
         link_bin_file = malloc(strlen(link_file) + 1);
         sprintf(link_bin_file, "%s", link_file);

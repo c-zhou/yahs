@@ -204,7 +204,8 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
             sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
             sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
 
-            if (p0 > p1) SWAP(uint32_t, p0, p1);
+            if (p0 > p1)
+                SWAP(uint32_t, p0, p1);
             if (i0 == i1 && p1 - p0 <= dist_thres) {
                 ++intra_c;
                 link_mat->link[i0].link[p0 / resolution] += 1;
