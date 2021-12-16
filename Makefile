@@ -19,8 +19,8 @@ extra: all $(PROG_EXTRA)
 debug: $(PROG)
 debug: CFLAGS += -DDEBUG
 
-yahs: asset.c bamlite.c break.c graph.c kalloc.c kopen.c link.c sdict.c binomlite.c yahs.c
-		$(CC) $(CFLAGS) asset.c bamlite.c break.c graph.c kalloc.c kopen.c link.c sdict.c binomlite.c yahs.c -o $@ -L. $(LIBS)
+yahs: asset.c bamlite.c break.c graph.c kalloc.c kopen.c link.c sdict.c binomlite.c enzyme.c yahs.c
+		$(CC) $(CFLAGS) asset.c bamlite.c break.c graph.c kalloc.c kopen.c link.c sdict.c binomlite.c enzyme.c yahs.c -o $@ -L. $(LIBS)
 
 juicer_pre: asset.c bamlite.c kalloc.c kopen.c link.c sdict.c juicer_pre.c
 		$(CC) $(CFLAGS) asset.c bamlite.c kalloc.c kopen.c link.c sdict.c juicer_pre.c -o $@ -L. $(LIBS)

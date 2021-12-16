@@ -503,6 +503,17 @@ char comp_table[] = {
     'p', 'q', 'y', 's', 'a', 'a', 'b', 'w', 'x', 'r', 'z', 123, 124, 125, 126, 127
 };
 
+char nucl_toupper[] = {
+      0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,
+     16,  17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,
+     32,  33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,
+     48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,
+     64, 'A', 'N', 'C', 'N', 'N', 'N', 'G', 'N', 'N', 'N', 'N', 'N', 'N', 'N', 'N',
+    'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N',  91,  92,  93,  94,  95,
+     64, 'A', 'N', 'C', 'N', 'N', 'N', 'G', 'N', 'N', 'N', 'N', 'N', 'N', 'N', 'N',
+    'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N', 123, 124, 125, 126, 127
+};
+
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd)
 {
     FILE *agp_in;
@@ -614,5 +625,20 @@ void write_sorted_agp(asm_dict_t *dict, FILE *fo)
         write_segs_to_agp(dict->seg + dict->s[j].s, dict->s[j].n, dict->sdict, ++s, fo);
     }
     free(c_pairs);
+}
+
+void write_sdict_to_agp(sdict_t *sdict, char *out)
+{
+    int i;
+    FILE *agp_out;
+    agp_out = fopen(out, "w");
+    if (agp_out == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
+        exit(EXIT_FAILURE);
+    }
+
+    for (i = 0; i < sdict->n; ++i)
+        fprintf(agp_out, "scaffold_%u\t1\t%u\t1\tW\t%s\t1\t%u\t+\n", i + 1, sdict->s[i].len, sdict->s[i].name, sdict->s[i].len);
+    fclose(agp_out);
 }
 

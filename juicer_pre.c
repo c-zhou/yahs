@@ -78,6 +78,8 @@ int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, FILE *fo)
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
     fclose(fp);
+    asm_destroy(dict);
+    sd_destroy(sdict);
 
     return 0;
 }
@@ -94,7 +96,7 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FIL
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
-    long pair_c;
+    long rec_c, pair_c;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -102,7 +104,9 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FIL
         exit(EXIT_FAILURE);
     }
 
-    pair_c = 0;
+    s0 = s1 = e0 = e1 = 0;
+    i0 = i1 = p0 = p1 = 0;
+    rec_c = pair_c = 0;
     buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (buff == 0) {
@@ -111,9 +115,8 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FIL
         } else if (buff == 1) {
             sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
             if (is_read_pair(rname0, rname1)) {
-                if (++pair_c % 1000000 == 0)
-                    fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
-
+                ++pair_c;
+                
                 sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2, &i0, &p0);
                 sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2, &i1, &p1);
                 if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
@@ -133,6 +136,9 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FIL
                 buff = 1;
             }
         }
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
@@ -140,6 +146,8 @@ int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, FIL
     if (line)
         free(line);
     fclose(fp);
+    asm_destroy(dict);
+    sd_destroy(sdict);
 
     return 0;
 }
@@ -158,9 +166,11 @@ static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
 
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
-    *cname = h->target_name[b->core.tid];
     // 0x4 0x100 0x400 0x800
-    if (b->core.flag & 0xD04 || b->core.qual < q) {
+    if (b->core.flag & 0xD04)
+        return 0;
+    *cname = h->target_name[b->core.tid];
+    if (b->core.qual < q) {
         *s = -1;
         *e = -1;
     } else {
@@ -183,7 +193,7 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, FIL
     int32_t s0, s1, e0, e1;
     uint32_t i0, i1, p0, p1;
     int8_t buff;
-    long pair_c;
+    long rec_c, pair_c;
 
     fp = bam_open(f, "r"); // sorted by read name
     if (fp == NULL) {
@@ -194,20 +204,24 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, FIL
     h = bam_header_read(fp);
     b = bam_init1();
     cname0 = cname1 = rname0 = rname1 = 0;
-
-    pair_c = 0;
+    s0 = s1 = e0 = e1 = 0;
+    i0 = i1 = p0 = p1 = 0;
+    rec_c = pair_c = 0;
     buff = 0;
     while (bam_read1(fp, b) >= 0 ) {
         if (buff == 0) {
             rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
+            if (!rname0)
+                continue;
             ++buff;
         } else if (buff == 1) {
             rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
+            if (!rname1)
+                continue;
             if (strcmp(rname0, rname1) == 0) {
-                if (++pair_c % 1000000 == 0)
-                    fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
+                ++pair_c;
 
-                if (s0 >= 0 && s1 >0) {
+                if (s0 > 0 && s1 >0) {
                     sd_coordinate_conversion(dict, sd_get(sdict, cname0), (s0 + e0) / 2, &i0, &p0);
                     sd_coordinate_conversion(dict, sd_get(sdict, cname1), (s1 + e1) / 2, &i1, &p1);
 
@@ -231,9 +245,13 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, FIL
                 e0 = e1;
                 free(rname0);
                 rname0 = rname1;
+                rname1 = 0;
                 buff = 1;
             }
         }
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
@@ -245,6 +263,8 @@ int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, FIL
     bam_destroy1(b);
     bam_header_destroy(h);
     bam_close(fp);
+    asm_destroy(dict);
+    sd_destroy(sdict);
 
     return 0;
 }

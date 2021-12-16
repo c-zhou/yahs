@@ -1177,9 +1177,11 @@ static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
 
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
-    *cname = h->target_name[b->core.tid];
     // 0x4 0x100 0x400 0x800
-    if (b->core.flag & 0xD04 || b->core.qual < q) {
+    if (b->core.flag & 0xD04)
+        return 0;
+    *cname = h->target_name[b->core.tid];
+    if (b->core.qual < q) {
         *s = -1;
         *e = -1;
     } else {
@@ -1200,7 +1202,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const 
     int32_t s0, s1, e0, e1;
     uint32_t i0, i1, p0, p1;
     int8_t buff;
-    long pair_c, inter_c, intra_c;
+    long rec_c, pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
 
     fp = bam_open(f, "r"); // sorted by read name
@@ -1218,23 +1220,28 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const 
     h = bam_header_read(fp);
     b = bam_init1();
     cname0 = cname1 = rname0 = rname1 = 0;
-
-    pair_c = inter_c = intra_c = buff = 0;
+    s0 = s1 = e0 = e1 = 0;
+    i0 = i1 = p0 = p1 = 0;
+    rec_c = pair_c = inter_c = intra_c = 0;
+    buff = 0;
     while (bam_read1(fp, b) >= 0 ) {
         if (buff == 0) {
             rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
+            if (!rname0)
+                continue;
             ++buff;
         } else if (buff == 1) {
             rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
+            if (!rname1)
+                continue;
             if (strcmp(rname0, rname1) == 0) {
-                if (++pair_c % 1000000 == 0)
-                    fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
-                
+                ++pair_c;
+
                 if (s0 > 0 && s1 > 0) {
                     i0 = sd_get(dict, cname0);
                     i1 = sd_get(dict, cname1);
 
-                    if (i0 == UINT32_MAX || i1 ==UINT32_MAX) {
+                    if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
                     } else {
                         if (i0 == i1)
@@ -1264,17 +1271,21 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const 
                 e0 = e1;
                 free(rname0);
                 rname0 = rname1;
+                rname1 = 0;
                 buff = 1;
             }
         }
-    }
 
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+    }
     if (rname0)
         free(rname0);
     if (rname1)
         free(rname1);
     bam_destroy1(b);
     bam_header_destroy(h);
+    sd_destroy(dict);
     bam_close(fp);
     fclose(fo);
 
@@ -1290,7 +1301,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const 
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     int8_t buff;
-    long pair_c, inter_c, intra_c;
+    long rec_c, pair_c, inter_c, intra_c;
     sdict_t *dict = make_sdict_from_index(fai);
 
     fp = fopen(f, "r");
@@ -1303,8 +1314,11 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const 
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
-
-    pair_c = inter_c = intra_c = buff = 0;
+    
+    s0 = s1 = e0 = e1 = 0;
+    i0 = i1 = p0 = p1 = 0;
+    rec_c = pair_c = inter_c = intra_c = 0;
+    buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (buff == 0) {
             sscanf(line, "%s %u %u %s", cname0, &s0, &e0, rname0);
@@ -1312,8 +1326,8 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const 
         } else if (buff == 1) {
             sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
             if (is_read_pair(rname0, rname1)) {
-                if (++pair_c % 1000000 == 0)
-                    fprintf(stderr, "[I::%s] %ld million read pairs processed \n", __func__, pair_c / 1000000);
+                ++pair_c;
+
                 i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
 
@@ -1344,10 +1358,14 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const 
                 buff = 1;
             }
         }
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
     
     if (line)
         free(line);
+    sd_destroy(dict);
     fclose(fp);
     fclose(fo);
 

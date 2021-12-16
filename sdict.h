@@ -33,6 +33,9 @@
 
 #include "khash.h"
 
+extern char comp_table[];
+extern char nucl_toupper[];
+
 typedef struct {
     char *name; // seq id
     char *seq; // sequence
@@ -98,7 +101,7 @@ void asm_sd_stats(asm_dict_t *d, uint32_t *n_stats, uint32_t *l_stats);
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd);
 void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE *fp);
 void write_sorted_agp(asm_dict_t *dict, FILE *fo);
-
+void write_sdict_to_agp(sdict_t *sdict, char *out);
 #ifdef __cplusplus
 }
 #endif

@@ -30,13 +30,16 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <assert.h>
+#include <ctype.h>
 
 #include "ketopt.h"
+#include "kvec.h"
 #include "sdict.h"
 #include "link.h"
 #include "graph.h"
 #include "break.h"
 #include "asset.h"
+#include "enzyme.h"
 
 #undef DEBUG
 #undef DEBUG_ERROR_BREAK
@@ -44,6 +47,7 @@
 #undef DEBUG_OPTIONS
 #undef DEBUG_RAM_USAGE
 #undef DEBUG_QLF
+#undef DEBUG_ENZ
 
 #define YAHS_VERSION "1.1a"
 
@@ -132,7 +136,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     rss_intra = estimate_intra_link_mat_init_rss(dict, resolution);
     if (rss_limit >= 0 && rss_intra > rss_limit) {
         // no enough memory
-        fprintf(stderr, "[I::%s] No enough memory. Trying higher resolutions... End of scaffolding round.\n", __func__);
+        fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
         fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
         fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
         asm_destroy(dict);
@@ -155,7 +159,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     rss_inter = estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
     if (rss_limit >= 0 && rss_inter > rss_limit) {
         // no enough memory
-        fprintf(stderr, "[I::%s] No enough memory. Trying higher resolutions... End of scaffolding round.\n", __func__);
+        fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
         fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
         fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
         asm_destroy(dict);
@@ -244,6 +248,8 @@ int contig_error_break(char *fai, char *link_file, char *out)
     dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
     dist_thres = MAX(dist_thres, 1000000);
     fprintf(stderr, "[I::%s] dist threshold for contig error break: %d\n", __func__, dist_thres);
+    asm_destroy(dict);
+
     char* out1 = (char *) malloc(strlen(out) + 35);
     ec_round = err_no = 0;
     while (1) {
@@ -315,24 +321,7 @@ int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, 
     return bp_n;
 }
 
-static void make_agp_from_fai(char *fai, char *out)
-{
-    int i;
-    sdict_t *sdict = make_sdict_from_index(fai);
-    FILE *agp_out;
-    agp_out = fopen(out, "w");
-    if (agp_out == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
-        exit(EXIT_FAILURE);
-    }
-    
-    for (i = 0; i < sdict->n; ++i)
-        fprintf(agp_out, "scaffold_%u\t1\t%u\t1\tW\t%s\t1\t%u\t+\n", i + 1, sdict->s[i].len, sdict->s[i].name, sdict->s[i].len);
-
-    fclose(agp_out);
-}
-
-int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions, int nr, int no_contig_ec, int no_scaffold_ec)
+int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec)
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
@@ -360,7 +349,7 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
             sprintf(out_agp_break, "%s", agp);
         } else {
             sprintf(out_agp_break, "%s_no_break.agp", out);
-            make_agp_from_fai(fai, out_agp_break);
+            write_sdict_to_agp(sdict, out_agp_break);
         }
     }
 
@@ -405,6 +394,8 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
             }
             ++rc;
         }
+
+        asm_destroy(dict);
     }
 
     sprintf(out_agp, "%s_scaffolds_final.agp", out);
@@ -418,10 +409,10 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     }
     write_sorted_agp(dict, fo);
     fclose(fo);
+    
     asm_destroy(dict);
-
     sd_destroy(sdict);
-
+    
     free(n_stats);
     free(l_stats);
 
@@ -473,8 +464,9 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a FILE           AGP file (for rescaffolding) [none]\n");
     fprintf(fp_help, "    -r INT[,INT,...]  list of resolutions in ascending order [automate]\n");
-    fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");
+    //fprintf(fp_help, "    -e STR            restriction enzyme cutting sites [none]\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
+    fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT            verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    --version         show version number\n");
 }
@@ -487,6 +479,8 @@ static ko_longopt_t long_options[] = {
     { 0, 0, 0 }
 };
 
+typedef struct {size_t n, m; char **a;} cstr_v;
+
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
@@ -494,13 +488,10 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    char *fa, *fai, *agp, *link_file, *out, *restr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions;
-    int nr;
-    int mq;
-    int no_contig_ec, no_scaffold_ec;
+    char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
+    int *resolutions, nr, mq, no_contig_ec, no_scaffold_ec;
 
-    const char *opt_str = "a:r:o:q:Vv:h";
+    const char *opt_str = "a:e:r:o:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
 
     int c, ret;
@@ -508,6 +499,7 @@ int main(int argc, char *argv[])
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
     no_contig_ec = no_scaffold_ec = 0;
     mq = 10;
+    ecstr = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'a') {
@@ -518,8 +510,10 @@ int main(int argc, char *argv[])
             out = opt.arg;
         } else if (c == 'q') {
             mq = atoi(opt.arg);
+        } else if (c == 'e') {
+            ecstr = opt.arg;
         } else if (c == 301) {
-            no_contig_ec = 1;            
+            no_contig_ec = 1;
         } else if (c == 302) {
             no_scaffold_ec = 1;
         } else if (c == 'v') {
@@ -567,6 +561,7 @@ int main(int argc, char *argv[])
         no_contig_ec = 1;
     
     if (restr) {
+        // resolutions
         int max_n_res = 128;
         char  *eptr, *fptr;
         resolutions = (int *) malloc(max_n_res * sizeof(int));
@@ -575,7 +570,7 @@ int main(int argc, char *argv[])
         while (*eptr != '\0') {
             if (nr == max_n_res) {
                 fprintf(stderr, "[E::%s] more than %d resolutions specified. Is that really necessary?\n", __func__, max_n_res);
-                exit(EXIT_FAILURE);                
+                exit(EXIT_FAILURE);
             }
             resolutions[nr++] = strtol(eptr + 1, &fptr, 10);
             eptr = fptr;
@@ -583,6 +578,58 @@ int main(int argc, char *argv[])
     } else {
         resolutions = default_resolutions;
         nr = default_nr(fai);
+    }
+    
+    re_cuts_t *re_cuts;
+    re_cuts = 0;
+    if (ecstr) {
+        // restriction enzymes cutting sites
+        int i, n;
+        char *pch;
+        cstr_v enz_cs = {0, 0, 0};
+        pch = strtok(ecstr, ",");
+        while (pch != NULL) {
+            n = -1;
+            for (i = 0; i < strlen(pch); ++i) {
+                c = pch[i];
+                if (!isalpha(c)) {
+                    fprintf(stderr, "[E::%s] non-alphabetic chacrater in restriction enzyme cutting site string: %s\n", __func__, pch);
+                    exit(EXIT_FAILURE);
+                }
+                pch[i] = nucl_toupper[c];
+                if (pch[i] == 'N') {
+                    if (n >= 0) {
+                        fprintf(stderr, "[E::%s] invalid restriction enzyme cutting site string (mutliple none-ACGT characters): %s\n", __func__, pch);
+                        exit(EXIT_FAILURE);
+                    }
+                    n = i;
+                }
+            }
+            if (n >= 0) {
+                pch[n] = 'A';
+                kv_push(char *, enz_cs, strdup(pch));
+                pch[n] = 'C';
+                kv_push(char *, enz_cs, strdup(pch));
+                pch[n] = 'G';
+                kv_push(char *, enz_cs, strdup(pch));
+                pch[n] = 'T';
+                kv_push(char *, enz_cs, strdup(pch));
+            } else {
+                kv_push(char *, enz_cs, strdup(pch));
+            }
+            pch = strtok(NULL, ",");
+        }
+#ifdef DEBUG_ENZ
+        printf("[I::%s] list of restriction enzyme cutting sites (n = %ld)\n", __func__, enz_cs.n);
+        for (i = 0; i < enz_cs.n; ++i)
+            printf("[I::%s] %s\n", __func__, enz_cs.a[i]);
+#endif
+        
+        re_cuts = find_re_from_seqs(fa, enz_cs.a, enz_cs.n);
+
+        for (i = 0; i < enz_cs.n; ++i)
+            free(enz_cs.a[i]);
+        kv_destroy(enz_cs);
     }
 
     if (out == 0)
@@ -592,12 +639,12 @@ int main(int argc, char *argv[])
     if (strcmp(ext, ".bam") == 0) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
-        fprintf(stderr, "[I::%s] dump hic links to binary file %s\n", __func__, link_bin_file);
+        fprintf(stderr, "[I::%s] dump hic links (BAM) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_bam_file(link_file, fai, mq8, link_bin_file);
     } else if (strcmp(ext, ".bed") == 0) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
-        fprintf(stderr, "[I::%s] dump hic links to binary file %s\n", __func__, link_bin_file);
+        fprintf(stderr, "[I::%s] dump hic links (BED) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_bed_file(link_file, fai, mq8, link_bin_file);
     } else if (strcmp(ext, ".bin") == 0) {
         link_bin_file = malloc(strlen(link_file) + 1);
@@ -614,6 +661,8 @@ int main(int argc, char *argv[])
     printf("[I::%s] linkb: %s\n", __func__, link_bin_file);
     printf("[I::%s] agp:   %s\n", __func__, agp);
     printf("[I::%s] res:   %s\n", __func__, restr);
+    printf("[I::%s] RE:    %s\n", __func__, ecstr);
+    printf("[I::%s] minq:  %hhu\n", __func__, mq8);
     printf("[I::%s] nr:    %d\n", __func__, nr);
     int i;
     for (i = 0; i < nr; ++i)
@@ -623,7 +672,7 @@ int main(int argc, char *argv[])
     printf("[I::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
-    ret = run_yahs(fai, agp, link_bin_file, out, resolutions, nr, no_contig_ec, no_scaffold_ec);
+    ret = run_yahs(fai, agp, link_bin_file, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);
@@ -655,6 +704,9 @@ int main(int argc, char *argv[])
 
     if (agp_final)
         free(agp_final);
+
+    if (re_cuts)
+        re_cuts_destroy(re_cuts);
 
     return ret;
 }
