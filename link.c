@@ -36,6 +36,7 @@
 
 #include "bamlite.h"
 #include "sdict.h"
+#include "enzyme.h"
 #include "link.h"
 #include "asset.h"
 
@@ -71,11 +72,6 @@ void inter_link_mat_destroy(inter_link_mat_t *link_mat)
     if (link_mat->links)
         free(link_mat->links);
     free(link_mat);
-}
-
-static inline uint32_t div_ceil(uint32_t x, uint32_t y)
-{
-    return 1 + ((MAX(x, 1) - 1) / y);
 }
 
 // index mapping (c0, c1) -> (i, j) -> (n * 2 - i - 3) * i / 2 + j - 1 
@@ -155,12 +151,13 @@ static inline uint32_t div_ceil(uint32_t x, uint32_t y)
 //     O o o o # #
 //          b1
 // 
-inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uint32_t radius)
+inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius)
 {
     inter_link_mat_t *link_mat;
     inter_link_t *link;
     uint32_t i, j, k, l, b0, b1, n, m, p, r2;
     double a0, a1, a;
+    float **re_dens;
 
     n = dict->n;
     m = n * (n - 1) / 2;
@@ -169,6 +166,11 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uin
     link_mat->n = m;
     link_mat->r = radius;
     link_mat->links = (inter_link_t *) malloc(m * sizeof(inter_link_t));
+    
+    re_dens = 0;
+    re_dens = calc_re_cuts_density2(re_cuts, resolution, dict);
+
+    //exit(0);
 
     for (i = 0; i < n; ++i) {
         if (dict->s[i].len < r2) {
@@ -178,7 +180,7 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uin
         }
         
         b0 = MIN(radius, div_ceil(dict->s[i].len, r2));
-        // relative edge length of the last cell
+        // relative size of the last cell
         a0 = MIN(1.0, (dict->s[i].len / 2.0 - (b0 - 1) * resolution) / resolution);
         for (j = i + 1; j < n; ++j) {
             link = &link_mat->links[(n * 2 - i - 3) * i / 2 + j - 1];
@@ -188,7 +190,7 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uin
             }
             
             b1 = MIN(radius, div_ceil(dict->s[j].len, r2));
-            // relative edge length of the last cell
+            // relative size of the last cell
             a1 = MIN(1.0, (dict->s[j].len / 2.0 - (b1 - 1) * resolution) / resolution);
             p = b0 * b1; 
             link->c0 = i;
@@ -201,8 +203,8 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uin
             link->linkt = 0;
             
             for (k = 0; k < 4; ++k) {
-                link->link[k] = (double *) calloc(p, sizeof(double));
-                link->linkb[k] = (double *) calloc(link->r, sizeof(double));
+                link->link[k] = (float *) calloc(p, sizeof(float));
+                link->linkb[k] = (float *) calloc(link->r, sizeof(float));
             }
 
             // calculate relative areas for each cell 
@@ -213,14 +215,20 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uin
                 if (l % b1 == b1 - 1)
                     a *= a1;
                 if (a < 0.5)
-                    a = -DBL_MAX;
+                    a = -FLT_MAX;
                 for (k = 0; k < 4; ++k)
                     link->link[k][l] = a;
             }
             memset(link->norms, 0, sizeof(link->norms));
         }
     }
-    
+
+    if (re_dens) {
+        for (i = 0; i < n; ++i)
+            free(re_dens[i]);
+        free(re_dens);
+    }
+
     return link_mat;
 }
 
@@ -250,25 +258,29 @@ long estimate_inter_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution, uin
             p = b0 * b1;
             r = MIN(radius, (uint32_t) (b0 + b1 - 1));
 
-            bytes += 4 * (p + r) * sizeof(double);
+            bytes += 4 * (p + r) * sizeof(float);
         }
     }
 
     return bytes;
 }
 
-intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, uint32_t resolution)
+intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution)
 {
     intra_link_mat_t *link_mat;
     intra_link_t *link;
     uint32_t i, j, n, b, p;
     double a;
+    float **re_dens;
 
     n = dict->n;
     link_mat = (intra_link_mat_t *) malloc(sizeof(intra_link_mat_t));
     link_mat->n = n;
     link_mat->links = (intra_link_t *) calloc(n, sizeof(intra_link_t));
-
+    
+    re_dens = 0;
+    re_dens = calc_re_cuts_density1(re_cuts, resolution, dict);
+    
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
         link->c = i;
@@ -278,10 +290,10 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, uint32_t resolution)
         }
         b = div_ceil(dict->s[i].len, resolution);
         link->n = b;
-        // relative edge length of the last cell
+        // relative size of the last cell
         a = ((double) dict->s[i].len - (b - 1) * resolution) / resolution;
         p = b * (b + 1) / 2;
-        link->link = (double *) calloc(p, sizeof(double));
+        link->link = (float *) calloc(p, sizeof(float));
         for (j = 0; j < p; ++j)
             link->link[j] = 1.0;
         // calculate relative area for each cell
@@ -292,10 +304,16 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, uint32_t resolution)
         // need a least half size to count
         for (j = 0; j < p; ++j)
             if (link->link[j] < 0.5)
-                link->link[j] = -DBL_MAX;
+                link->link[j] = -FLT_MAX;
 #ifdef DEBUG
         printf("[I::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
 #endif
+    }
+
+    if (re_dens) {
+        for (i = 0; i < n; ++i)
+            free(re_dens[i]);
+        free(re_dens);
     }
 
     return link_mat;
@@ -317,12 +335,12 @@ long estimate_intra_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution)
             continue;
         b = div_ceil(dict->s[i].len, resolution);
         p = b * (b + 1) / 2;
-        bytes += p * sizeof(double);
+        bytes += p * sizeof(float);
     }
     return bytes;
 }
 
-intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, uint32_t resolution)
+intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, uint32_t resolution)
 {
     intra_link_mat_t *link_mat;
     intra_link_t *link;
@@ -343,10 +361,10 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, uint32_t resolution)
         }
         b = div_ceil(dict->s[i].len, resolution);
         link->n = b;
-        // relative edge length of the last cell
+        // relative size of the last cell
         a = ((double) dict->s[i].len - (b - 1) * resolution) / resolution;
         p = b * (b + 1) / 2;
-        link->link = (double *) calloc(p, sizeof(double));
+        link->link = (float *) calloc(p, sizeof(float));
         for (j = 0; j < p; ++j)
             link->link[j] = 1.0;
         // calculate relative area for each cell
@@ -357,7 +375,7 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, uint32_t resolution)
         // need a least half size to count
         for (j = 0; j < p; ++j)
             if (link->link[j] < 0.5)
-                link->link[j] = -DBL_MAX;
+                link->link[j] = -FLT_MAX;
 #ifdef DEBUG
         printf("[I::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
 #endif
@@ -382,20 +400,20 @@ long estimate_intra_link_mat_init_sdict_rss(sdict_t *dict, uint32_t resolution)
             continue;
         b = div_ceil(dict->s[i].len, resolution);
         p = b * (b + 1) / 2;
-        bytes += p * sizeof(double);
+        bytes += p * sizeof(float);
     }
     return bytes;
 }
 
 
-static inline void normalise_by_size(double *l)
+static inline void normalise_by_size(float *l)
 {
     if (*l < 0) 
         return;
-    double f, i;
+    float f, i;
     // f is the float part, i.e., area
     // i is the integer part, i.e., links
-    f = modf(*l, &i);
+    f = modff(*l, &i);
     if (f == 0.0) {
         f = 1.0;
         i -= 1.0;
@@ -416,10 +434,11 @@ static inline void normalise_by_size(double *l)
 // 22 (0,4) 19 (1,4) 15 (2,4) 10 (3,4) 4  (4,4)
 // 25 (0,5) 23 (1,5) 20 (2,5) 16 (3,5) 11 (4,5) 5  (5,5)
 // 27 (0,6) 26 (1,6) 24 (2,6) 21 (3,6) 17 (4,6) 12 (5,6) 6  (6,6)
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, int use_gap_seq)
+intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq)
 {
     uint32_t i, j, n, b0, b1;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint64_t p0, p1;
     long pair_c, intra_c;
     intra_link_mat_t *link_mat;
     intra_link_t *link;
@@ -429,7 +448,7 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint
     if (fp == NULL)
         return 0;
 
-    link_mat = use_gap_seq? intra_link_mat_init(dict, resolution) : intra_link_mat_init_sdict(dict->sdict, resolution);
+    link_mat = use_gap_seq? intra_link_mat_init(dict, re_cuts, resolution) : intra_link_mat_init_sdict(dict->sdict, re_cuts, resolution);
 
     pair_c = 0;
     intra_c = 0;
@@ -438,8 +457,8 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint
         m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
             if (use_gap_seq) {
-                sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
-                sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+                sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
+                sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
                 b0 = (MAX(p0, 1) - 1) / resolution;
                 b1 = (MAX(p1, 1) - 1) / resolution;
             } else {
@@ -486,10 +505,11 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint
     return link_mat;
 }
 
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, uint32_t radius)
+inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius)
 {
     uint32_t i, j, n, k, b0, b1;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint64_t p0, p1;
     double l0, l1, a, na[4], nc[4];
     long pair_c, inter_c, radius_c, noise_c;
     inter_link_mat_t *link_mat;
@@ -501,21 +521,21 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, uint
         return 0;
 
     n = dict->n;
-    link_mat = inter_link_mat_init(dict, resolution, radius);
+    link_mat = inter_link_mat_init(dict, re_cuts, resolution, radius);
     pair_c = inter_c = radius_c = 0;
 
     while (1) {
         m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
+            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
 
             if (i0 != i1) {
                 ++inter_c;
                 
                 if (i0 > i1) {
                     SWAP(uint32_t, i0, i1);
-                    SWAP(uint32_t, p0, p1);
+                    SWAP(uint64_t, p0, p1);
                 }
 
                 link = &link_mat->links[(n * 2 - i0 - 3) * i0 / 2 + i1 - 1];
@@ -626,8 +646,8 @@ void norm_destroy(norm_t *norm)
     free(norm);
 }
 
-int dcmp (const void * a, const void * b) {
-   double cmp = *(double *) a - *(double *) b;
+int fcmp (const void * a, const void * b) {
+   float cmp = *(float *) a - *(float *) b;
    return cmp > 0? 1 : ( cmp < 0? -1 : 0);
 }
 
@@ -636,7 +656,7 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
     uint32_t i, j, n, b, r, r0, t;
     uint32_t *bs;
     double intra_c, tmp_c;
-    double *norms, *link, *linkc;
+    float *norms, *link, *linkc;
     norm_t *norm;
     
     // find maximum numebr of bands
@@ -669,16 +689,16 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
 
     // caluclate links in each band and radius
     // calculate norms - using median or mean?
-    norms = (double *) malloc(n * sizeof(double));
-    linkc = (double *) malloc(n * sizeof(double));
+    norms = (float *) malloc(n * sizeof(float));
+    linkc = (float *) malloc(n * sizeof(float));
     intra_c = 0.0;
     for (i = 0; i < n; ++i) {
-        link = (double *) malloc(bs[i] * sizeof(double));
+        link = (float *) malloc(bs[i] * sizeof(float));
         t = 0;
         for (j = 0; j < link_mat->n; ++j) {
             b = link_mat->links[j].n;
             if (b > i + 1) {
-                memcpy(link + t, link_mat->links[j].link + (b * 2 - i - 1) * i / 2 + i, (b - 1 - i) * sizeof(double));
+                memcpy(link + t, link_mat->links[j].link + (b * 2 - i - 1) * i / 2 + i, (b - 1 - i) * sizeof(float));
                 t += b - 1 - i;
             }
         }
@@ -690,7 +710,7 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
         intra_c += tmp_c;
         
         if (USE_MEDIAN_NORM) {
-            qsort(link, bs[i], sizeof(double), dcmp);
+            qsort(link, bs[i], sizeof(float), fcmp);
             norms[i] = bs[i] & 1? link[bs[i] / 2] : (link[bs[i] / 2] + link[bs[i] / 2 - 1]) / 2;
         } else {
             norms[i] = MAX(linkc[i], 1.0) / bs[i];
@@ -776,14 +796,14 @@ void print_inter_link_bands(FILE *fp, inter_link_mat_t *link_mat, asm_dict_t *di
     }
 }
 
-double *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict)
+float *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict)
 {
     uint32_t i, j, n, c0, c1;
-    double *max_norms;
+    float *max_norms;
     inter_link_t *link;
 
     n = link_mat->n;
-    max_norms = (double *) calloc(dict->n, sizeof(double));
+    max_norms = (float *) calloc(dict->n, sizeof(float));
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
         if (link->n) {
@@ -802,7 +822,7 @@ void print_norms(FILE *fp, norm_t *norm)
 {
     uint32_t i/**, j, n**/;
     //uint64_t link_count;
-    //double *link;
+    //float *link;
 
     //link_count = 0;
 
@@ -940,7 +960,6 @@ void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimate
     }
     **/
     
-    double c1 = 0;
     c = c0 = 0;
     for (i = 0; i < link_mat->n; ++i) {
         inter_link = &link_mat->links[i];
@@ -994,14 +1013,14 @@ void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimate
         }
         inter_link->n0 = n0;
         c += n0;
-        c1 += t;
+        c0 += t;
 loop_i_end:
         free(fr);
         free(fn);
     }
     
-    *la = c1 / c;
-    fprintf(stderr, "[I::%s] average link count: %.3f %.3f %.3f\n", __func__, c1, c, *la);
+    *la = c0 / c;
+    fprintf(stderr, "[I::%s] average link count: %.3f %.3f %.3f\n", __func__, c0, c, *la);
     
     free(norms);
 }
@@ -1009,7 +1028,8 @@ loop_i_end:
 int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
 {
     uint32_t i, j, n, na, k, b0, b1, b, ma, sma, n_ma;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint64_t p0, p1;
     uint32_t *link, l;
     int8_t *directs;
     long pair_c, inter_c;
@@ -1027,15 +1047,15 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
     while (1) {
         m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
+            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
 
             if (i0 != i1) {
                 ++inter_c;
 
                 if (i0 > i1) {
                     SWAP(uint32_t, i0, i1);
-                    SWAP(uint32_t, p0, p1);
+                    SWAP(uint64_t, p0, p1);
                 }
                 b0 = !((double) p0 / dict->s[i0].len > 0.5);
                 b1 = !((double) p1 / dict->s[i1].len > 0.5);
@@ -1056,13 +1076,6 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
 #endif
     fclose(fp);
     
-    i0 = asm_sd_get(dict, "scaffold_11");
-    i1 = asm_sd_get(dict, "scaffold_111");
-    if (i0 > i1)
-        SWAP(uint32_t, i0, i1);
-    j = (n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1;
-    printf("XXXXX: %u %u %u %u %u %u\n", dict->s[i0].len, dict->s[i1].len, link[j], link[na + j], link[na * 2 + j], link[na * 3 + j]);
-
     directs = (int8_t *) malloc(na * sizeof(int8_t));
     for (i = 0; i < na; ++i) {
         ma = sma = n_ma = j = 0;
@@ -1248,8 +1261,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const 
                             ++intra_c;
                         else
                             ++inter_c;
-                        p0 = (s0 + e0) / 2;
-                        p1 = (s1 + e1) / 2;
+                        p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
+                        p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
                         if (i0 > i1) {
                             SWAP(uint32_t, i0, i1);
                             SWAP(uint32_t, p0, p1);
@@ -1338,8 +1351,8 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint8_t mq, const 
                         ++intra_c;
                     else
                         ++inter_c;
-                    p0 = (s0 + e0) / 2;
-                    p1 = (s1 + e1) / 2;
+                    p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
+                    p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
                     if (i0 > i1) {
                         SWAP(uint32_t, i0, i1);
                         SWAP(uint32_t, p0, p1);

@@ -63,8 +63,10 @@ link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b)
     link_mat->link = (link_t *) malloc(link_mat->n * sizeof(link_t));
 
     uint32_t i;
-    for (i = 0; i < link_mat->n; ++i)
+    for (i = 0; i < link_mat->n; ++i) {
+        assert(dict->s[i].len / b < UINT32_MAX);
         link_mat->link[i] = *link_init(i, dict->s[i].len / b + 1);
+    }
     return link_mat;
 }
 
@@ -82,13 +84,16 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     uint32_t i;
     FILE *fp;
     long pair_c, intra_c, cum_c;
-    uint32_t max_len, nb, *link_c;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint64_t max_len;
+    uint32_t nb, *link_c;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint64_t p0, p1;
 
     max_len = 0;
     for (i = 0; i < dict->n; ++i)
         if (dict->s[i].len > max_len)
             max_len = dict->s[i].len;
+    assert(max_len / resolution < UINT32_MAX);
     nb = max_len / resolution + 1;
     link_c = (uint32_t *) calloc(nb, sizeof(uint32_t));
 
@@ -103,8 +108,8 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     while (1) {
         m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
+            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
             if (i0 == i1) {
                 ++link_c[labs((long) p0 - p1) / resolution];
                 ++intra_c;
@@ -177,7 +182,8 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
 {
     FILE *fp;
     uint32_t i, j, n;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1, p0, p1;
+    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint64_t p0, p1;
     long pair_c, intra_c;
 
     fp = fopen(f, "r");
@@ -191,6 +197,7 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     link_mat->n = dict->n;
     link_mat->link = (link_t *) malloc(link_mat->n * sizeof(link_t));
     for (i = 0; i < link_mat->n; ++i) {
+        assert(dict->s[i].len / resolution < UINT32_MAX);
         n = dict->s[i].len / resolution + 1;
         link_mat->link[i].s = i;
         link_mat->link[i].n = n;
@@ -201,11 +208,11 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     while (1) {
         m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
         for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1);
+            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
+            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
 
             if (p0 > p1)
-                SWAP(uint32_t, p0, p1);
+                SWAP(uint64_t, p0, p1);
             if (i0 == i1 && p1 - p0 <= dist_thres) {
                 ++intra_c;
                 link_mat->link[i0].link[p0 / resolution] += 1;
@@ -277,11 +284,11 @@ int cnt_cmp(const void *p, const void *q)
 
 KDQ_INIT(int64_t)
 
-static void add_break_point(bp_t *bp, uint32_t p)
+static void add_break_point(bp_t *bp, uint64_t p)
 {
     if (bp->n == bp->m) {
         bp->m <<= 1;
-        bp->p = (uint32_t *) realloc(bp->p, bp->m * sizeof(uint32_t));
+        bp->p = (uint64_t *) realloc(bp->p, bp->m * sizeof(uint64_t));
     }
     bp->p[bp->n] = p;
     ++bp->n;
@@ -329,15 +336,14 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
                     bp1->s = i;
                     bp1->n = 0;
                     bp1->m = 4;
-                    bp1->p = (uint32_t *) malloc(bp1->m * sizeof(uint32_t));
+                    bp1->p = (uint64_t *) malloc(bp1->m * sizeof(uint64_t));
                     ++b_n;
                     a = 1;
                 }
                 add_break_point(bp1, seg.a);
 #ifdef DEBUG_LOCAL_BREAK
-                printf("[I::%s] break local joint: %s at %u (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[seg.a / bin_size], mcnt);
+                printf("[I::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[seg.a / bin_size], mcnt);
 #endif
-
             }
         }
     }
@@ -451,7 +457,7 @@ bp_t *detect_break_points(link_mat_t *link_mat, uint32_t bin_size, uint32_t merg
         bp1->s = i;
         bp1->n = 0;
         bp1->m = 4;
-        bp1->p = (uint32_t *) malloc(bp1->m * sizeof(uint32_t));
+        bp1->p = (uint64_t *) malloc(bp1->m * sizeof(uint64_t));
         ++b_n;
 
         for (j = 0; j < kdq_size(q); ++j) {
@@ -540,7 +546,7 @@ void print_break_point(bp_t *bp, asm_dict_t *dict, FILE *fp)
     int i;
     fprintf(fp, "%s[%u]:", dict->s[bp->s].name, bp->n);
     for (i = 0; i < bp->n; ++i)
-        fprintf(fp, " %u", bp->p[i]);
+        fprintf(fp, " %lu", bp->p[i]);
     fprintf(fp, "\n");
 }
 
@@ -549,9 +555,10 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
     uint32_t i, j, s, ns, ms;
     int64_t L, l;
     uint64_t len;
-    sd_seg_t seg, *segs;
+    sd_seg_t *segs, seg;
     sdict_t *sd;
-    uint32_t *p, p_n;
+    uint64_t *p;
+    uint32_t p_n;
 
     ns = 0;
     ms = 4096;
@@ -571,7 +578,7 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
                 seg = d->seg[d->s[i].s + j];
                 if (p_n == 0 || seg.a + seg.y <= p[0]) {
                     // current seg contains no break points
-                    sd_seg_t seg1 = {seg.s, len, seg.c, seg.x, seg.y};
+                    sd_seg_t seg1 = {seg.s, ns, len, seg.c, seg.x, seg.y};
                     segs[ns] = seg1;
                     if (ns == ms) {
                         ms <<= 1;
@@ -584,7 +591,7 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
                     assert(-l < UINT32_MAX && l < UINT32_MAX);
                     if (l > 0) {
                         // split seg
-                        sd_seg_t seg1 = {seg.s, len, seg.c, seg.c & 1? (uint32_t) (-l + seg.x + seg.y) : seg.x, (uint32_t) l};
+                        sd_seg_t seg1 = {seg.s, ns, len, seg.c, seg.c & 1? (uint32_t) (-l + seg.x + seg.y) : seg.x, (uint32_t) l};
                         segs[ns] = seg1;
                         ++ns;
                     }
@@ -597,9 +604,9 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
 
                     L = l;
                     while (p_n > 0 && seg.a + seg.y > p[0]) {
-                        l = (int64_t) p[0] - p[-1];
+                        l = (int64_t) (p[0] - p[-1]);
                         assert(l < UINT32_MAX);
-                        sd_seg_t seg1 = {seg.s, 0, seg.c, seg.c & 1? (uint32_t) (-L - l + seg.x + seg.y) : (uint32_t) (L + seg.x), (uint32_t) l};
+                        sd_seg_t seg1 = {seg.s, ns, 0, seg.c, seg.c & 1? (uint32_t) (-L - l + seg.x + seg.y) : (uint32_t) (L + seg.x), (uint32_t) l};
                         write_segs_to_agp(&seg1, 1, sd, ++s, fp);
                         L += l;
                         if (--p_n) 
@@ -608,7 +615,7 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
                     
                     assert(-L < UINT32_MAX && L < UINT32_MAX);
                     if (L < seg.y) {
-                        sd_seg_t seg1 = {seg.s, 0, seg.c, seg.c & 1? seg.x : (uint32_t) (L + seg.x), (uint32_t) (-L + seg.y)};
+                        sd_seg_t seg1 = {seg.s, ns, 0, seg.c, seg.c & 1? seg.x : (uint32_t) (L + seg.x), (uint32_t) (-L + seg.y)};
                         len += -L + seg.y;
                         segs[ns] = seg1;
                         ++ns;

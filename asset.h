@@ -27,6 +27,9 @@
  * 02/09/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
+#ifndef ASSET_H_
+#define ASSET_H_
+
 #include <stdint.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -47,8 +50,11 @@ long peakrss(void);
 long aslimit(void);
 int file_copy(char *fin, char *fout);
 int8_t is_read_pair(const char *rname0, const char *rname1);
-
+uint32_t div_ceil(uint64_t x, uint32_t y);
+uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g);
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* ASSET_H_ */
 

@@ -27,6 +27,9 @@
  * 02/09/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
+#ifndef BREAK_H_
+#define BREAK_H_
+
 #include <stdlib.h>
 #include <stdint.h>
 #include "sdict.h"
@@ -48,7 +51,7 @@ typedef struct {
 
 typedef struct {
     uint32_t n, m, s; //s: seq id
-    uint32_t *p;
+    uint64_t *p;
 } bp_t;
 
 #ifdef __cplusplus
@@ -70,4 +73,5 @@ void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp);
 }
 #endif
 
+#endif /* BREAK_H_ */
 

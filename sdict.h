@@ -27,14 +27,15 @@
  * 15/04/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
-#ifndef SDICT_H
-#define SDICT_H
+#ifndef SDICT_H_
+#define SDICT_H_
+
 #include <stdint.h>
 
 #include "khash.h"
 
-extern char comp_table[];
-extern char nucl_toupper[];
+extern char comp_table[128];
+extern char nucl_toupper[128];
 
 typedef struct {
     char *name; // seq id
@@ -51,11 +52,16 @@ typedef struct {
     sdhash_t *h; // sequence hash map: name -> index
 } sdict_t;
 
-typedef struct {uint32_t s, a, c, x, y;} sd_seg_t; // s:seq id, a: seq start, subseq c: id << 1 | ori, x: start, y: length
+typedef struct {
+    uint32_t s; // seq id
+    uint32_t k; // seg index on seq
+    uint64_t a; // seq start
+    uint32_t c, x, y; // subseq c: id << 1 | ori, x: start, y: length
+} sd_seg_t;
 
 typedef struct {
     char *name; // seq id
-    uint32_t len; // seq length
+    uint64_t len; // seq length
     uint32_t n; // seg number
     uint32_t s; // seg start position
 } sd_aseq_t;
@@ -74,8 +80,6 @@ typedef struct {
     sdict_t *sdict; // sub sequence dictionary
 } asm_dict_t;
 
-extern char comp_table[128];
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -91,20 +95,21 @@ sdict_t *make_sdict_from_fa(const char *f);
 sdict_t *make_sdict_from_index(const char *f);
 sdict_t *make_sdict_from_gfa(const char *f);
 asm_dict_t *make_asm_dict_from_sdict(sdict_t *sdict);
-uint32_t asm_put(asm_dict_t *d, const char *name, uint32_t len, uint32_t n, uint32_t s);
+uint32_t asm_put(asm_dict_t *d, const char *name, uint64_t len, uint32_t n, uint32_t s);
 asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f);
 char *get_asm_seq(asm_dict_t *d, char *name);
 uint32_t asm_sd_get(asm_dict_t *d, const char *name);
-int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint32_t *p);
-void sd_stats(sdict_t *d, uint32_t *n_stats, uint32_t *l_stats);
-void asm_sd_stats(asm_dict_t *d, uint32_t *n_stats, uint32_t *l_stats);
+int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap);
+void sd_stats(sdict_t *d, uint64_t *n_stats, uint32_t *l_stats);
+void asm_sd_stats(asm_dict_t *d, uint64_t *n_stats, uint32_t *l_stats);
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd);
 void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE *fp);
 void write_sorted_agp(asm_dict_t *dict, FILE *fo);
 void write_sdict_to_agp(sdict_t *sdict, char *out);
+void write_asm_dict_to_agp(asm_dict_t *dict, char *out);
 #ifdef __cplusplus
 }
 #endif
 
-#endif
+#endif /* SDICT_H_ */
 

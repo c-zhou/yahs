@@ -29,6 +29,7 @@
  *********************************************************************************/
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
 
 #include "asset.h"
 
@@ -93,5 +94,25 @@ int8_t is_read_pair(const char *rname0, const char *rname1)
     if (!strncmp(rname0, rname1, n - 2))
         return 1;
     return 0;
+}
+
+inline uint32_t div_ceil(uint64_t x, uint32_t y)
+{
+    uint64_t b = (MAX(x, 1) - 1) / y;
+    assert(b < UINT32_MAX);
+    return 1 + b;
+}
+
+uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g)
+{
+    int s;
+    s = 0;
+    while (g > max_g) {
+        ++s;
+        g >>= 1;
+    }
+    
+    *scale = s;
+    return g;
 }
 

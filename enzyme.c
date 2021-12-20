@@ -35,6 +35,7 @@
 #include "kvec.h"
 #include "enzyme.h"
 #include "sdict.h"
+#include "asset.h"
 
 #undef DEBUG_ENZ
 
@@ -45,22 +46,17 @@ re_cuts_t *re_cuts_init(uint32_t n)
     re_cuts->density = 0;
     re_cuts->re = (re_t *) malloc(n * sizeof(re_t));
     uint32_t i;
-    for (i = 0; i < n; ++i) {
+    for (i = 0; i < n; ++i)
         re_cuts->re[i].sites = 0;
-        re_cuts->re[i].dens = 0;
-    }
     return re_cuts;
 }
 
 void re_cuts_destroy(re_cuts_t *re_cuts)
 {
     uint32_t i;
-    for (i = 0; i < re_cuts->n; ++i) {
+    for (i = 0; i < re_cuts->n; ++i)
         if (re_cuts->re[i].sites)
             free(re_cuts->re[i].sites);
-        if (re_cuts->re[i].dens)
-            free(re_cuts->re[i].dens);
-    }
     free(re_cuts->re);
     free(re_cuts);
 }
@@ -68,24 +64,25 @@ void re_cuts_destroy(re_cuts_t *re_cuts)
 typedef struct {size_t n, m; uint32_t *a;} u32_v;
 int u32_cmp(const void *p, const void *q)
 {
-    int64_t d = *(int64_t *) p - *(int64_t *) q;
-    return d == 0? 0 : (d > 0? 1 : -1);
+    uint32_t a, b;
+    a = *(uint32_t *) p;
+    b = *(uint32_t *) q;
+    return a == b? 0 : (a > b? 1 : -1);
 }
 
 re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
 {
     // now find all RE cutting sites
     int i, j, c, c0, c1;
-    uint32_t len, n, p, n_re;
-    int64_t genome_size;
+    uint32_t len, n, p;
+    int64_t n_re, genome_size;
     char *pch, *seq, *re;
     sdict_t *sdict;
     re_cuts_t *re_cuts;
 
     sdict = make_sdict_from_fa(f);
     n = sdict->n;
-    n_re = 0;
-    genome_size = 0;
+    n_re = genome_size = 0;
     re_cuts = re_cuts_init(n);
     for (i = 0; i < n; ++i) {
         u32_v enz_cs_pos = {0, 0, 0};
@@ -142,7 +139,7 @@ re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
 
     re_cuts->density = (double) n_re / genome_size;
 
-    fprintf(stderr, "[I::%s] NO. restriction enzyme cutting sites found in sequences: %u\n", __func__, n_re);
+    fprintf(stderr, "[I::%s] NO. restriction enzyme cutting sites found in sequences: %ld\n", __func__, n_re);
     fprintf(stderr, "[I::%s] restriction enzyme cutting sites density: %.6f\n", __func__, re_cuts->density);
 #ifdef DEBUG_ENZ
     printf("[I::%s] restriction enzyme cutting sites for individual sequences (n = %d)\n", __func__, n);
@@ -153,5 +150,170 @@ re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
     sd_destroy(sdict);
 
     return re_cuts;
+}
+
+float **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution)
+{
+    if (!re_cuts)
+        return 0;
+
+    uint32_t i, j, b;
+    float **dens, *ds;
+    re_t re;
+    dens = (float **) malloc(re_cuts->n * sizeof(float *));
+    for (i = 0; i < re_cuts->n; ++i) {
+        re = re_cuts->re[i];
+        b = div_ceil(re.l, resolution);
+        ds = (float *) calloc(b, sizeof(float));
+        for (j = 0; j < re.n; ++j)
+            ds[re.sites[j] / resolution] += 1.0;
+        for (j = 0; j < b - 1; ++j)
+            ds[j] /= (double) resolution * re_cuts->density;
+        ds[b - 1] /= ((double) re.l - (b - 1) * resolution) * re_cuts->density;
+
+        dens[i] = ds;
+#ifdef DEBUG_ENZ
+        printf("DENS [%u/%u] (%u):", i, re_cuts->n, b);
+        for (j = 0; j < b; ++j)
+            printf(" %.6f", ds[j]);
+        printf("\n");
+#endif
+    }
+    return dens;
+}
+
+static uint32_t bin_search(uint32_t *a, uint32_t n, uint32_t s)
+{
+    uint32_t low, high, mid;
+    low = 0;
+    high = n;
+    while (low != high) {
+        mid = (low >> 1) + (high >> 1);
+        if (a[mid] < s)
+            low = mid + 1;
+        else
+            high = mid;
+    }
+    return low;
+} 
+
+float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
+{
+    if (!re_cuts)
+        return 0;
+
+    uint32_t i, j, b, n, e, a;
+    float **dens, *ds;
+    re_t re;
+    sd_aseq_t seq;
+    sd_seg_t seg;
+    
+    n = dict->n;
+    dens = (float **) malloc(n * sizeof(float *));
+    for (i = 0; i < n; ++i) {
+        seq = dict->s[i];
+        b = div_ceil(seq.len, resolution);
+        ds = (float *) calloc(b, sizeof(float));
+        for (j = 0; j < seq.n; ++j) {
+            seg = dict->seg[seq.s + j];
+            re = re_cuts->re[seg.c >> 1]; // get seq re cuts
+            e = seg.x + seg.y; // seq end position, exclusive
+            // binary search to get starting re cuts
+            // first cutting site no smaller than seg.x
+            // not many seq breaks - linear search might be faster on average?
+            a = bin_search(re.sites, re.n, seg.x);
+            
+            if (seg.c & 1) {
+                // reverse complement
+                while (a < re.n && re.sites[a] < e) {
+                    ds[(seg.a + seg.y - (re.sites[a] - seg.x)) / resolution] += 1.0;
+                    ++a;
+                }
+            } else {
+                while (a < re.n && re.sites[a] < e) {
+                    ds[(seg.a + re.sites[a] - seg.x) / resolution] += 1.0;
+                    ++a;
+                }
+            }
+        }
+        for (j = 0; j < b - 1; ++j)
+            ds[j] /= (double) resolution * re_cuts->density;
+        ds[b - 1] /= ((double) seq.len - (b - 1) * resolution) * re_cuts->density;
+        
+        dens[i] = ds;
+#ifdef DEBUG_ENZ
+        printf("DENS1 [%u/%u] (%u):", i, n, b);
+        for (j = 0; j < b; ++j)
+            printf(" %.6f", ds[j]);
+        printf("\n");
+#endif
+    }
+
+    return dens;
+}
+
+float **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
+{
+    if (!re_cuts)
+        return 0;
+
+    uint32_t i, j, b, n, e, a;
+    uint64_t l, p;
+    float **dens, *ds;
+    re_t re;
+    sd_aseq_t seq;
+    sd_seg_t seg;
+    n = dict->n;
+    dens = (float **) malloc(n * sizeof(float *));
+    for (i = 0; i < n; ++i) {
+        seq = dict->s[i];
+        l = seq.len >> 1; // split sequence into two parts
+        b = div_ceil(l, resolution);
+        ds = (float *) calloc(b << 1, sizeof(float));
+        for (j = 0; j < seq.n; ++j) {
+            seg = dict->seg[seq.s + j];
+            re = re_cuts->re[seg.c >> 1]; // get seq re cuts
+            e = seg.x + seg.y; // seq end position, exclusive
+            // binary search to get starting re cuts
+            // first cutting site no smaller than seg.x
+            // not many seq breaks - linear search might be faster on average?
+            a = bin_search(re.sites, re.n, seg.x);
+            if (seg.c & 1) {
+                // reverse complement
+                while (a < re.n && re.sites[a] < e) {
+                    p = seg.a + seg.y - (re.sites[a] - seg.x); // position on seq
+                    if (p < l)
+                        ds[p / resolution << 1] += 1.0;
+                    else
+                        ds[ (seq.len - p) / resolution << 1 | 1] += 1.0;
+                    ++a;
+                }
+            } else {
+                while (a < re.n && re.sites[a] < e) {
+                    p = seg.a + re.sites[a] - seg.x; // position on seq
+                    if (p < l)
+                        ds[p / resolution << 1] += 1.0;
+                    else
+                        ds[ (seq.len - p) / resolution << 1 | 1] += 1.0;
+                    ++a;
+                }
+            }
+        }
+        for (j = 0; j < (b - 1) << 1; ++j)
+            ds[j] /= (double) resolution * re_cuts->density;
+        ds[(b - 1) << 1] /= ((double) l - (b - 1) * resolution) * re_cuts->density;
+        ds[(b - 1) << 1 | 1] /= ((double) l - (b - 1) * resolution) * re_cuts->density;
+        
+        dens[i] = ds;
+#ifdef DEBUG_ENZ
+        printf("DENS2 [%u/%u] (%u):", i, n, b);
+        for (j = 0; j < b << 1; ++j)
+            printf(" %.6f", ds[j]);
+        printf("\n");
+#endif
+
+    }
+
+    return dens;
 }
 

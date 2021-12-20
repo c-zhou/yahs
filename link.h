@@ -27,10 +27,14 @@
  * 23/06/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
+#ifndef LINK_H_
+#define LINK_H_
+
 #include <stdlib.h>
 #include <stdint.h>
 
 #include "sdict.h"
+#include "enzyme.h"
 
 #define SQRT2 1.41421356237
 #define SQRT2_2 0.70710678118
@@ -38,7 +42,7 @@
 typedef struct {
     uint32_t c;
     uint32_t n;
-    double *link;
+    float *link;
 } intra_link_t;
 
 typedef struct {
@@ -51,9 +55,9 @@ typedef struct {
     // link[1]: i0(-) -> i1(-)
     // link[2]: i0(+) -> i1(+)
     // link[3]: i0(+) -> i1(-)
-    double *link[4]; // size 4 x n
-    double *linkb[4]; // total number of links in each band, of size 4 x r
-    double norms[4];
+    float *link[4]; // size 4 x n
+    float *linkb[4]; // total number of links in each band, of size 4 x r
+    float norms[4];
 } inter_link_t;
 
 typedef struct {
@@ -71,9 +75,9 @@ typedef struct {
 typedef struct {
     uint32_t n; // number of bands
     uint32_t *bs; // number of cells in each band [1 x n]
-    // double **link; // number of links in each cell [n x b]
-    double *norms; // norms [1 x n]
-    double *linkc; // link count in each band [1 x n]
+    // float **link; // number of links in each cell [n x b]
+    float *norms; // norms [1 x n]
+    float *linkc; // link count in each band [1 x n]
     uint32_t r; // number of first r bands contains at least 90% links adjusted by norms
 } norm_t;
 
@@ -81,11 +85,11 @@ typedef struct {
 extern "C" {
 #endif
 
-intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, uint32_t resolution);
-intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, uint32_t resolution);
-inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uint32_t radius);
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, int use_gap_seq);
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t resolution, uint32_t radius);
+intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution);
+intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, uint32_t resolution);
+inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius);
+intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq);
+inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius);
 intra_link_t *get_intra_link(intra_link_mat_t *link_mat, uint32_t i, uint32_t j);
 inter_link_t *get_inter_link(inter_link_mat_t *link_mat, uint32_t i, uint32_t j);
 norm_t *calc_norms(intra_link_mat_t *link_mat);
@@ -99,7 +103,7 @@ void print_inter_link_bands(FILE *fp, inter_link_mat_t *link_mat, asm_dict_t *di
 void intra_link_mat_destroy(intra_link_mat_t *link_mat);
 void inter_link_mat_destroy(inter_link_mat_t *link_mat);
 void norm_destroy(norm_t *norm);
-double *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict);
+float *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict);
 int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict);
 void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *dict, int8_t *directs);
 void dump_links_from_bam_file(const char *f, const char *fai, uint8_t mq, const char *out);
@@ -110,4 +114,6 @@ long estimate_intra_link_mat_init_sdict_rss(sdict_t *dict, uint32_t resolution);
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* LINK_H_ */
 

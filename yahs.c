@@ -38,8 +38,8 @@
 #include "link.h"
 #include "graph.h"
 #include "break.h"
-#include "asset.h"
 #include "enzyme.h"
+#include "asset.h"
 
 #undef DEBUG
 #undef DEBUG_ERROR_BREAK
@@ -48,17 +48,28 @@
 #undef DEBUG_RAM_USAGE
 #undef DEBUG_QLF
 #undef DEBUG_ENZ
+#undef DEBUG_GT4G
 
 #define YAHS_VERSION "1.1a"
 
 #define ENOMEM_ERR 15
 #define ENOBND_ERR 14
 
+#ifndef DEBUG_GT4G
+static int ec_min_window = 1000000;
 static int ec_resolution = 10000;
 static int ec_bin = 1000;
 static int ec_move_avg = 0;
 static int ec_merge_thresh = 10000;
 static int ec_dual_break_thresh = 50000;
+#else
+static int ec_min_window = 5000000;
+static int ec_resolution = 50000;
+static int ec_bin = 5000;
+static int ec_move_avg = 0;
+static int ec_merge_thresh = 50000;
+static int ec_dual_break_thresh = 250000;
+#endif
 static double ec_min_frac = 0.80;
 static double ec_fold_thresh = 0.2;
 
@@ -114,18 +125,18 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolution, double *noise)
+int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, char *out, int resolution, double *noise)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
     
     int i;
-    long len = 0;
+    uint64_t len = 0;
     for (i = 0; i < dict->n; ++i)
         len += dict->s[i].len;
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] #sequences loaded %d = %ldbp\n", __func__, dict->n, len);
+    printf("[I::%s] #sequences loaded %d = %lubp\n", __func__, dict->n, len);
 #endif
 
     long rss_limit, rss_intra, rss_inter;
@@ -147,7 +158,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
 #ifdef DEBUG_RAM_USAGE
     printf("[I::%s] RAM intra: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
 #endif
-    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, resolution, 1);
+    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, re_cuts, resolution, 1);
     norm_t *norm = calc_norms(intra_link_mat);
     if (norm == 0) {
         fprintf(stderr, "[W::%s] No enough bands for norm calculation... End of scaffolding round.\n", __func__);
@@ -171,7 +182,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, char *out, int resolu
     printf("[I::%s] RAM inter: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
     printf("[I::%s] RAM  free: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
 #endif
-    inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, resolution, norm->r);
+    inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, re_cuts, resolution, norm->r);
     *noise = inter_link_mat->noise / resolution / resolution;
 
     int8_t *directs = 0;
@@ -246,7 +257,7 @@ int contig_error_break(char *fai, char *link_file, char *out)
     sdict = make_sdict_from_index(fai);
     dict = make_asm_dict_from_sdict(sdict);
     dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
-    dist_thres = MAX(dist_thres, 1000000);
+    dist_thres = MAX(dist_thres, ec_min_window);
     fprintf(stderr, "[I::%s] dist threshold for contig error break: %d\n", __func__, dist_thres);
     asm_destroy(dict);
 
@@ -295,7 +306,7 @@ int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, 
 
     dist_thres = flank_size * 2;
     //dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
-    //dist_thres = MAX(dist_thres, 1000000);
+    //dist_thres = MAX(dist_thres, ec_min_window);
     //fprintf(stderr, "[I::%s] dist threshold for scaffold error break: %d\n", __func__, dist_thres);
     link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, noise, ec_move_avg);
 
@@ -321,11 +332,26 @@ int scaffold_error_break(char *fai, char *link_file, char *agp, int flank_size, 
     return bp_n;
 }
 
+static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats)
+{
+#ifdef DEBUG
+    int i;
+    printf("[I::%s] assembly stats:\n", __func__);
+    for (i = 0; i < 10; ++i)
+        printf("[I::%s] N%d: %lu (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
+#else
+    fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
+    fprintf(stderr, "[I::%s] N%d: %lu (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
+    fprintf(stderr, "[I::%s] N%d: %lu (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
+#endif
+}
+
 int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec)
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
-    uint32_t *n_stats, *l_stats;
+    uint64_t *n_stats;
+    uint32_t *l_stats;
     double noise;
     FILE *fo;
     sdict_t *sdict;
@@ -354,36 +380,31 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     }
 
     r = rc = 0;
-    n_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
+    n_stats = (uint64_t *) calloc(10, sizeof(uint64_t));
     l_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
+    
+    dict = make_asm_dict_from_agp(sdict, out_agp_break);
+    asm_sd_stats(dict, n_stats, l_stats);
+    print_asm_stats(n_stats, l_stats);
+    asm_destroy(dict);
+
     while (r++ < nr) {
         fprintf(stderr, "[I::%s] scaffolding round %d resolution = %d\n", __func__, r, resolutions[r - 1]);
         
         dict = make_asm_dict_from_agp(sdict, out_agp_break);
-        asm_sd_stats(dict, n_stats, l_stats);
         if (n_stats[4] < resolutions[r - 1] * 10) {
             if (rc) {
-                fprintf(stderr, "[I::%s] assembly N50 (%u) too small. End of scaffolding.\n", __func__, n_stats[4]);
+                fprintf(stderr, "[I::%s] assembly N50 (%lu) too small. End of scaffolding.\n", __func__, n_stats[4]);
                 break;    
             } else {
-                fprintf(stderr, "[W::%s] assembly N50 (%u) too small. Scaffolding anyway...\n", __func__, n_stats[4]);
+                fprintf(stderr, "[W::%s] assembly N50 (%lu) too small. Scaffolding anyway...\n", __func__, n_stats[4]);
                 fprintf(stderr, "[W::%s] consider running with increased memory limit if there ws memory issue.\n", __func__);
             }
         }
-#ifdef DEBUG
-        int i;
-        printf("[I::%s] assembly stats:\n", __func__);
-        for (i = 0; i < 10; ++i)
-            printf("[I::%s] N%d: %u (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
-#else
-        fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
-        fprintf(stderr, "[I::%s] N%d: %u (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
-        fprintf(stderr, "[I::%s] N%d: %u (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
-#endif
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, out_fn, resolutions[r - 1], &noise);
+        re = run_scaffolding(fai, out_agp_break, link_file, re_cuts, out_fn, resolutions[r - 1], &noise);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
@@ -394,7 +415,11 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
             }
             ++rc;
         }
+        asm_destroy(dict);
 
+        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        asm_sd_stats(dict, n_stats, l_stats);
+        print_asm_stats(n_stats, l_stats);
         asm_destroy(dict);
     }
 
@@ -423,7 +448,11 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     return 0;
 }
 
+#ifndef DEBUG_GT4G
 static int default_resolutions[13] = {10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000};
+#else
+static int default_resolutions[13] = {50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000, 100000000, 250000000, 500000000};
+#endif
 
 static int default_nr(char *fai)
 {

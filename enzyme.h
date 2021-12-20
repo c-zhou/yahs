@@ -27,17 +27,21 @@
  * 14/12/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
+#ifndef ENZYME_H_
+#define ENZYME_H_
+
 #include <stdint.h>
 
+#include "sdict.h"
+
 typedef struct {
-    uint32_t l, n, d; // seq len, number cuts, number densities
+    uint32_t l, n; // seq len, number cuts
     uint32_t *sites; // cutting sites
-    double *dens; // densities
 } re_t;
 
 typedef struct {
     uint32_t n; // sequence number
-    double density; // number cuts per base
+    float density; // number cuts per base
     re_t *re; // cutting sites
 } re_cuts_t;
 
@@ -48,8 +52,13 @@ extern "C" {
 re_cuts_t *re_cuts_init(uint32_t n);
 void re_cuts_destroy(re_cuts_t *re_cuts);
 re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n);
+float **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution);
+float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
+float **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
 
 #ifdef __cplusplus
 }
 #endif
+
+#endif /* ENZYME_H_ */
 
