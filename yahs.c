@@ -54,6 +54,8 @@
 
 #define ENOMEM_ERR 15
 #define ENOBND_ERR 14
+#define GB 0x40000000
+#define MAX_N_SEQ 45000
 
 #ifndef DEBUG_GT4G
 static int ec_min_window = 1000000;
@@ -125,7 +127,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, char *out, int resolution, double *noise)
+int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai);
@@ -139,25 +141,23 @@ int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, c
     printf("[I::%s] #sequences loaded %d = %lubp\n", __func__, dict->n, len);
 #endif
 
-    long rss_limit, rss_intra, rss_inter;
-    rss_limit = aslimit();
-#ifdef DEBUG_RAM_USAGE
-    printf("[I::%s] RAM limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
-#endif
+    long rss_intra, rss_inter;
     rss_intra = estimate_intra_link_mat_init_rss(dict, resolution);
-    if (rss_limit >= 0 && rss_intra > rss_limit) {
+    if ((rss_limit >= 0 && rss_intra > rss_limit) || rss_intra < 0) {
         // no enough memory
         fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
-        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
-        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
+        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, (double) rss_limit / GB);
+        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, (double) rss_intra / GB);
         asm_destroy(dict);
         sd_destroy(sdict);
         return ENOMEM_ERR;
     }
     rss_limit -= rss_intra;
 #ifdef DEBUG_RAM_USAGE
-    printf("[I::%s] RAM intra: %.3fGB\n", __func__, rss_intra / 1024.0 / 1024.0 / 1024.0);
+    printf("[I::%s] RAM intra: %.3fGB\n", __func__, (double) rss_intra / GB);
 #endif
+
+    fprintf(stderr, "[I::%s] starting norm estimation...\n", __func__);
     intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, re_cuts, resolution, 1);
     norm_t *norm = calc_norms(intra_link_mat);
     if (norm == 0) {
@@ -168,20 +168,22 @@ int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, c
         return ENOBND_ERR;
     }
     rss_inter = estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
-    if (rss_limit >= 0 && rss_inter > rss_limit) {
+    if ((rss_limit >= 0 && rss_inter > rss_limit) || rss_inter < 0) {
         // no enough memory
         fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
-        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
-        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
+        fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, (double) rss_limit / GB);
+        fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, (double) rss_inter / GB);
         asm_destroy(dict);
         sd_destroy(sdict);
         return ENOMEM_ERR;
     }
     rss_limit -= rss_inter;
 #ifdef DEBUG_RAM_USAGE
-    printf("[I::%s] RAM inter: %.3fGB\n", __func__, rss_inter / 1024.0 / 1024.0 / 1024.0);
-    printf("[I::%s] RAM  free: %.3fGB\n", __func__, rss_limit / 1024.0 / 1024.0 / 1024.0);
+    printf("[I::%s] RAM inter: %.3fGB\n", __func__, (double) rss_inter / GB);
+    printf("[I::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
 #endif
+
+    fprintf(stderr, "[I::%s] starting link estimation...\n", __func__);
     inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, re_cuts, resolution, norm->r);
     *noise = inter_link_mat->noise / resolution / resolution;
 
@@ -192,6 +194,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, re_cuts_t *re_cuts, c
     calc_link_directs(inter_link_mat, 0.1, dict, directs);
     free(directs);
 
+    fprintf(stderr, "[I::%s] starting scaffolding graph contruction...\n", __func__);
     graph_t *g = build_graph_from_links(inter_link_mat, dict, 0.1, la);
 
 #ifdef DEBUG_GRAPH_PRUNE
@@ -341,8 +344,8 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats)
         printf("[I::%s] N%d: %lu (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
 #else
     fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
-    fprintf(stderr, "[I::%s] N%d: %lu (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
-    fprintf(stderr, "[I::%s] N%d: %lu (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
+    fprintf(stderr, "[I::%s]  N%d: %lu (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
+    fprintf(stderr, "[I::%s]  N%d: %lu (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
 #endif
 }
 
@@ -356,6 +359,11 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     FILE *fo;
     sdict_t *sdict;
     asm_dict_t *dict;
+    long rss_total, rss_limit;  
+    
+    ram_limit(&rss_total, &rss_limit);
+    fprintf(stderr, "[I::%s] RAM total: %.3fGB\n", __func__, (double) rss_total / GB);
+    fprintf(stderr, "[I::%s] RAM limit: %.3fGB\n", __func__, (double) rss_limit / GB);
 
     sdict = make_sdict_from_index(fai);
     out_fn = (char *) malloc(strlen(out) + 35);
@@ -384,6 +392,13 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
     l_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
     
     dict = make_asm_dict_from_agp(sdict, out_agp_break);
+    if (dict->n > MAX_N_SEQ) {
+        fprintf(stderr, "[E::%s] sequence number exceeds limit (%d > %d)\n", __func__, dict->n, MAX_N_SEQ);
+        fprintf(stderr, "[E::%s] consider removing short sequences before scaffolding, or\n", __func__);
+        fprintf(stderr, "[E::%s] running without error correction (--no-contig-ec) if due to excessive contig error breaks\n", __func__);
+        fprintf(stderr, "[E::%s] program halted...\n", __func__);
+        return 1;
+    }
     asm_sd_stats(dict, n_stats, l_stats);
     print_asm_stats(n_stats, l_stats);
     asm_destroy(dict);
@@ -404,7 +419,7 @@ int run_yahs(char *fai, char *agp, char *link_file, char *out, int *resolutions,
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, re_cuts, out_fn, resolutions[r - 1], &noise);
+        re = run_scaffolding(fai, out_agp_break, link_file, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {

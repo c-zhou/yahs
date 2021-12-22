@@ -505,7 +505,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[I::%s] make juicer pre input from BED file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bed(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
     } else if (strcmp(ext, ".bin") == 0) {
-        fprintf(stderr, "[I::%s] make juicer pre input from bin file %s\n", __func__, link_file);
+        fprintf(stderr, "[I::%s] make juicer pre input from BIN file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bin(link_file, agp1, fai, scale, !asm_mode, fo);
     } else {
         fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin is expected\n", __func__);

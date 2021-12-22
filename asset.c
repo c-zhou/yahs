@@ -30,6 +30,9 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <unistd.h>
+#include <sys/resource.h>
+#include <sys/time.h>
 
 #include "asset.h"
 
@@ -58,14 +61,19 @@ double realtime(void)
     return tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
-long aslimit(void)
+void ram_limit(long *total, long *avail)
 {
-    long as;
+    long t, a, a1;
     struct rlimit lim;
     getrlimit(RLIMIT_RSS, &lim);
-    as = lim.rlim_cur;
+    a = lim.rlim_cur;
     getrlimit(RLIMIT_AS, &lim);
-    return MAX(as, (long) lim.rlim_cur);
+    a = MAX(a, (long) lim.rlim_cur);
+    a1 = (long) (sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE));
+    a = a > 0? MIN(a, a1) : a1;
+    t = sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
+    *avail = a;
+    *total = t;
 }
 
 int file_copy(char *fin, char *fout)

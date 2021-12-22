@@ -31,8 +31,6 @@
 #define ASSET_H_
 
 #include <stdint.h>
-#include <sys/resource.h>
-#include <sys/time.h>
 
 #define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -47,7 +45,7 @@ extern "C" {
 double realtime(void);
 double cputime(void);
 long peakrss(void);
-long aslimit(void);
+void ram_limit(long *total, long *avail);
 int file_copy(char *fin, char *fout);
 int8_t is_read_pair(const char *rname0, const char *rname1);
 uint32_t div_ceil(uint64_t x, uint32_t y);
