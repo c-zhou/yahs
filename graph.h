@@ -38,7 +38,7 @@
 typedef struct {
     uint32_t v, w; // vetex_id | ori
     int32_t rank;
-    float wt;
+    double wt;
     uint64_t link_id:61, strong:1, del:1, comp:1; // link_id: a pair of dual arcs are supposed to have the same link_id
 } graph_arc_t;
 
@@ -66,7 +66,7 @@ extern "C" {
 graph_t *graph_init(void);
 void graph_destroy(graph_t *g);
 void graph_print(const graph_t *g, FILE *fp, int no_seq);
-graph_arc_t *graph_add_arc(graph_t *g, uint32_t v, uint32_t w, int64_t link_id, int comp, float wt);
+graph_arc_t *graph_add_arc(graph_t *g, uint32_t v, uint32_t w, int64_t link_id, int comp, double wt);
 int graph_arc_is_sorted(const graph_t *g);
 void graph_arc_sort(graph_t *g);
 void graph_arc_index(graph_t *g);
@@ -77,7 +77,7 @@ graph_t *graph_print_gv_around_node(const graph_t *g, FILE *fp, uint32_t *v, int
 void graph_print_all_clusters(graph_t *g, FILE *fp);
 int graph_remove_multi_arcs(graph_t *g);
 int graph_add_symm_arcs(graph_t *g);
-int trim_graph_simple_filter(graph_t *g, float min_wt, float min_diff_h, float min_diff_l, int min_len);
+int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff_h, double min_diff_l, int min_len);
 int trim_graph_tips(graph_t *g);
 int trim_graph_blunts(graph_t *g);
 int trim_graph_repeats(graph_t *g);

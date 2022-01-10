@@ -35,7 +35,7 @@
 #include "sdict.h"
 
 #define SQRT2 1.41421356237
-#define SQRT2_2 0.70710678118
+#define SQRT2_2 .70710678118
 
 typedef struct {
     uint32_t s; // seq id

@@ -63,10 +63,9 @@ link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b)
     link_mat->link = (link_t *) malloc(link_mat->n * sizeof(link_t));
 
     uint32_t i;
-    for (i = 0; i < link_mat->n; ++i) {
-        assert(dict->s[i].len / b < UINT32_MAX);
-        link_mat->link[i] = *link_init(i, dict->s[i].len / b + 1);
-    }
+    for (i = 0; i < link_mat->n; ++i)
+        link_mat->link[i] = *link_init(i, div_ceil(dict->s[i].len, b));
+    
     return link_mat;
 }
 
@@ -93,8 +92,7 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     for (i = 0; i < dict->n; ++i)
         if (dict->s[i].len > max_len)
             max_len = dict->s[i].len;
-    assert(max_len / resolution < UINT32_MAX);
-    nb = max_len / resolution + 1;
+    nb = div_ceil(max_len, resolution);
     link_c = (uint32_t *) calloc(nb, sizeof(uint32_t));
 
     fp = fopen(f, "r");
@@ -197,8 +195,7 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     link_mat->n = dict->n;
     link_mat->link = (link_t *) malloc(link_mat->n * sizeof(link_t));
     for (i = 0; i < link_mat->n; ++i) {
-        assert(dict->s[i].len / resolution < UINT32_MAX);
-        n = dict->s[i].len / resolution + 1;
+        n = div_ceil(dict->s[i].len, resolution);
         link_mat->link[i].s = i;
         link_mat->link[i].n = n;
         link_mat->link[i].link = (int64_t *) calloc(n, sizeof(int64_t));
@@ -215,8 +212,8 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
                 SWAP(uint64_t, p0, p1);
             if (i0 == i1 && p1 - p0 <= dist_thres) {
                 ++intra_c;
-                link_mat->link[i0].link[p0 / resolution] += 1;
-                link_mat->link[i0].link[p1 / resolution] -= 1;
+                link_mat->link[i0].link[(MAX(p0, 1) - 1) / resolution] += 1;
+                link_mat->link[i1].link[(MAX(p1, 1) - 1) / resolution] -= 1;
             }
         }
         pair_c += m / 4;
@@ -265,6 +262,7 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
         for (j = 0; j < n; ++j)
             link_c[j] |= (int64_t) j << 32;
     }
+    
     return link_mat;
 }
 
@@ -316,17 +314,17 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
         a = 0;
         for (j = 1; j < seq.n; j++) {
             seg = segs[seq.s + j];
-            s = (seg.a - MIN(flank_size, segs[seq.s + j - 1].y)) / bin_size;
-            e = (seg.a + MIN(flank_size, seg.y)) / bin_size;
-            // s = (seg.a - MIN(flank_size, seg.a)) / bin_size;
-            // e = (seg.a + MIN(flank_size, seq.len - seg.a)) / bin_size;
+            s = (MAX(seg.a - MIN(flank_size, segs[seq.s + j - 1].y), 1) - 1) / bin_size;
+            e = (MAX(seg.a + MIN(flank_size, seg.y), 1) - 1) / bin_size;
+            // s = (MAX(seg.a - MIN(flank_size, seg.a), 1) - 1) / bin_size;
+            // e = (MAX(seg.a + MIN(flank_size, seq.len - seg.a), 1) - 1) / bin_size;
             t = e - s + 1;
             qsort(link + s, t, sizeof(int64_t), cnt_cmp);
-            mcnt = t & 1? (int32_t) link[(e + s) / 2] : ((int32_t) link[(e + s) / 2] + (int32_t) link[(e + s) / 2 + 1]) / 2.0;
+            mcnt = t & 1? (int32_t) link[(e + s) / 2] : ((int32_t) link[(e + s) / 2] + (int32_t) link[(e + s) / 2 + 1]) / 2.;
             mcnt *= fold_thres;
             qsort(link + s, t, sizeof(int64_t), pos_cmp);
 
-            if ((int32_t) link[seg.a / bin_size] < mcnt) {
+            if ((int32_t) link[(MAX(seg.a, 1) - 1) / bin_size] < mcnt) {
                 if (!a) {
                     if (b_n == b_m) {
                         b_m <<= 1;
@@ -342,7 +340,7 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
                 }
                 add_break_point(bp1, seg.a);
 #ifdef DEBUG_LOCAL_BREAK
-                printf("[I::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[seg.a / bin_size], mcnt);
+                printf("[I::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[(MAX(seg.a, 1) - 1) / bin_size], mcnt);
 #endif
             }
         }
@@ -367,7 +365,7 @@ static int make_dual_break(int64_t *link, uint32_t s, uint32_t e, uint32_t d, do
             u = 0;
             ls = i;
             lm = l;
-        } else if (l > MAX(10.0, lm / fold_thres)) {
+        } else if (l > MAX(10., lm / fold_thres)) {
             if (++u >= d)
                 break;
         }
@@ -381,7 +379,7 @@ static int make_dual_break(int64_t *link, uint32_t s, uint32_t e, uint32_t d, do
             u = 0;
             le = e - i + s;
             lm = l;
-        } else if (l > MAX(10.0, lm / fold_thres)) {
+        } else if (l > MAX(10., lm / fold_thres)) {
             if (++u >= d)
                 break;
         }
@@ -418,7 +416,7 @@ bp_t *detect_break_points(link_mat_t *link_mat, uint32_t bin_size, uint32_t merg
         // sort by link count
         qsort(link, n, sizeof(int64_t), cnt_cmp);
         // find median
-        mcnt = n & 1? (int32_t) link[n / 2] : ((int32_t) link[n / 2] + (int32_t) link[n / 2 - 1]) / 2.0;
+        mcnt = n & 1? (int32_t) link[n / 2] : ((int32_t) link[n / 2] + (int32_t) link[n / 2 - 1]) / 2.;
         // find count threshold
         mcnt *= fold_thres;
         // find positions below threshold
@@ -500,7 +498,7 @@ bp_t *detect_break_points(link_mat_t *link_mat, uint32_t bin_size, uint32_t merg
                 e = k < bp1->n - 1? bp1->p[k + 1] : n - 1;
                 t = e - s + 1;
                 qsort(link + s, t, sizeof(int64_t), cnt_cmp);
-                mcnt = t & 1? (int32_t) link[(e + s) / 2] : ((int32_t) link[(e + s) / 2] + (int32_t) link[(e + s) / 2 + 1]) / 2.0;
+                mcnt = t & 1? (int32_t) link[(e + s) / 2] : ((int32_t) link[(e + s) / 2] + (int32_t) link[(e + s) / 2 + 1]) / 2.;
                 mcnt *= fold_thres;
                 qsort(link + s, t, sizeof(int64_t), pos_cmp);
                 if ((int32_t) link[bp1->p[k]] > mcnt)

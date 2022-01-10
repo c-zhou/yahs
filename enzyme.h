@@ -41,7 +41,7 @@ typedef struct {
 
 typedef struct {
     uint32_t n; // sequence number
-    float density; // number cuts per base
+    double density; // number cuts per base
     re_t *re; // cutting sites
 } re_cuts_t;
 
@@ -51,10 +51,10 @@ extern "C" {
 
 re_cuts_t *re_cuts_init(uint32_t n);
 void re_cuts_destroy(re_cuts_t *re_cuts);
-re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n);
-float **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution);
-float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
-float **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
+re_cuts_t *find_re_from_seqs(const char *f, uint32_t ml, char **enz_cs, int enz_n);
+double **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution);
+double **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
+double **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict);
 
 #ifdef __cplusplus
 }

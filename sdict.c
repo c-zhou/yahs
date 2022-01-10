@@ -164,7 +164,7 @@ void sd_hash(sdict_t *d)
     }
 }
 
-sdict_t *make_sdict_from_fa(const char *f)
+sdict_t *make_sdict_from_fa(const char *f, uint32_t min_len)
 {
     int fd, l;
     gzFile fp;
@@ -184,7 +184,8 @@ sdict_t *make_sdict_from_fa(const char *f)
     // WARNING: might introduce bug here
     // l is int type by definition in kseq.h
     while ((l = kseq_read(ks)) >= 0)
-        sd_put1(d, ks->name.s, ks->seq.s, strlen(ks->seq.s));
+        if (strlen(ks->seq.s) >= min_len)
+            sd_put1(d, ks->name.s, ks->seq.s, strlen(ks->seq.s));
 
     kseq_destroy(ks);
     gzclose(fp);
@@ -193,7 +194,7 @@ sdict_t *make_sdict_from_fa(const char *f)
     return d;
 }
 
-sdict_t *make_sdict_from_index(const char *f)
+sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
 {
     FILE *fp;
     char *line = NULL;
@@ -212,13 +213,14 @@ sdict_t *make_sdict_from_index(const char *f)
     d = sd_init();
     while ((read = getline(&line, &ln, fp)) != -1) {
         sscanf(line, "%s %u", name, &len);
-        sd_put(d, name, len);
+        if (len >= min_len)
+            sd_put(d, name, len);
     }
     fclose(fp);
     return d;
 }
 
-sdict_t *make_sdict_from_gfa(const char *f)
+sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
 {
     FILE *fp;
     char *line = NULL;
@@ -239,7 +241,8 @@ sdict_t *make_sdict_from_gfa(const char *f)
         if (line[0] == 'S') {
             sscanf(line, "%*s %s %*s %s", name, lens);
             len = strtoul(lens + 5, NULL, 10);
-            sd_put(d, name, len);
+            if (len >= min_len)
+                sd_put(d, name, len);
         }
     }
     fclose(fp);
@@ -334,6 +337,9 @@ void asm_index(asm_dict_t *d)
     }
 
     radix_sort_pair(c_pairs, c_pairs + s);
+    
+    if (d->index)
+        free(d->index);
     d->index = (uint64_t *) malloc(s * sizeof(uint64_t));
     a = d->a;
     c1 = INT32_MAX;
@@ -386,8 +392,10 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
         cstart = strtoul(cstarts, NULL, 10);
         cend = strtoul(cends, NULL, 10);
         c = sd_get(sdict, cname);
-        if (c == UINT32_MAX)
+        if (c == UINT32_MAX) {
+            fprintf(stderr, "[E::%s] sequence %s not found\n", __func__, cname);
             return 0;
+        }
         c <<= 1;
         if (strncmp(oris, "+", 1)) 
             c |= 1;
@@ -414,6 +422,21 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
         free(name);
     
     return d;
+}
+
+void add_unplaced_short_seqs(asm_dict_t *d, uint32_t min_len)
+{
+    uint32_t i;
+    sdict_t *sdict;
+    
+    sdict = d->sdict;
+    for (i = 0; i < sdict->n; ++i) {
+        if (sdict->s[i].len >= min_len)
+            continue;
+        seg_put(d, d->n, 0, 0, i<<1, 0, sdict->s[i].len);
+        asm_put(d, sdict->s[i].name, sdict->s[i].len, 1, d->u - 1);
+    }
+    asm_index(d);
 }
 
 int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap)
@@ -456,13 +479,13 @@ static void nl_stats(uint64_t *s, uint32_t n, uint64_t *n_stats, uint32_t *l_sta
 
     b = 0;
     j = 0;
-    a = 0.1 * (++j) * bs;
+    a = .1 * (++j) * bs;
     for (i = 0; i < n; ++i) {
         b += s[i];
         while (b >= a) {
             l_stats[j - 1] = i + 1;
             n_stats[j - 1] = s[i];
-            a = 0.1 * (++j) * bs;
+            a = .1 * (++j) * bs;
         }
     }
 }
@@ -538,7 +561,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
         exit(EXIT_FAILURE);
     }
 
-    dict = make_sdict_from_fa(fa);
+    dict = make_sdict_from_fa(fa, 0);
     l = 0;
     while ((read = getline(&line, &ln, agp_in)) != -1) {
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);

@@ -96,7 +96,7 @@ void graph_print(const graph_t *g, FILE *fp, int no_seq)
     }
 }
 
-graph_arc_t *graph_add_arc(graph_t *g, uint32_t v, uint32_t w, int64_t link_id, int comp, float wt)
+graph_arc_t *graph_add_arc(graph_t *g, uint32_t v, uint32_t w, int64_t link_id, int comp, double wt)
 {
     graph_arc_t *a;
     if (g->m_arc == g->n_arc) {
@@ -157,11 +157,11 @@ graph_t *read_graph_from_gfa(char *gfa)
     size_t ln = 0;
     ssize_t read;
     char c0[1024], c1[1024], s0[4], s1[4], wts[1024];
-    float wt;
+    double wt;
 
     graph_t *g;
     g = graph_init();
-    g->sdict = make_asm_dict_from_sdict(make_sdict_from_gfa(gfa));
+    g->sdict = make_asm_dict_from_sdict(make_sdict_from_gfa(gfa, 0));
     
     fp = fopen(gfa, "r");
     if (fp == NULL) {
@@ -301,7 +301,7 @@ int graph_add_symm_arcs(graph_t *g)
         w = a->w;
         if (graph_arc(g, w^1, v^1))
             continue;
-        graph_add_arc(g, w^1, v^1, -1, 0, 0.0);
+        graph_add_arc(g, w^1, v^1, -1, 0, .0);
     }
 #ifdef DEBUG
     printf("number symm-arcs added: %d\n", n_add);
@@ -374,10 +374,10 @@ void graph_print_all_clusters(graph_t *g, FILE *fp)
     free(visited);
 }
 
-int trim_graph_simple_filter(graph_t *g, float min_wt, float min_diff_h, float min_diff_l, int min_len)
+int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff_h, double min_diff_l, int min_len)
 {
     uint32_t v, nv, na, n_del, n_ma;
-    float mwt, smwt;
+    double mwt, smwt;
     graph_arc_t *av, *a;
     nv = graph_n_vtx(g);
     nv <<= 1;
@@ -432,7 +432,7 @@ static int is_mwt(graph_t *g, uint32_t v, uint32_t w)
 {
     int b;
     uint32_t na;
-    float mwt;
+    double mwt;
     graph_arc_t *a, *av;
 
     na = graph_arc_n(g, v);
@@ -671,7 +671,7 @@ int trim_graph_pop_undirected(graph_t *g)
     return n_del;
 }
 
-static inline int exist_strong_edge(graph_t *g, uint32_t v, float wt)
+static inline int exist_strong_edge(graph_t *g, uint32_t v, double wt)
 {
     uint32_t na;
     graph_arc_t *a, *av;

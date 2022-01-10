@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <float.h>
 
 #include "kvec.h"
 #include "enzyme.h"
@@ -38,6 +39,9 @@
 #include "asset.h"
 
 #undef DEBUG_ENZ
+
+static double MIN_RE_DENS = .1;
+static double MAX_RE_DENS = DBL_MAX;
 
 re_cuts_t *re_cuts_init(uint32_t n)
 {
@@ -70,7 +74,7 @@ int u32_cmp(const void *p, const void *q)
     return a == b? 0 : (a > b? 1 : -1);
 }
 
-re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
+re_cuts_t *find_re_from_seqs(const char *f, uint32_t ml, char **enz_cs, int enz_n)
 {
     // now find all RE cutting sites
     int i, j, c, c0, c1;
@@ -80,7 +84,7 @@ re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
     sdict_t *sdict;
     re_cuts_t *re_cuts;
 
-    sdict = make_sdict_from_fa(f);
+    sdict = make_sdict_from_fa(f, ml);
     n = sdict->n;
     n_re = genome_size = 0;
     re_cuts = re_cuts_init(n);
@@ -152,25 +156,29 @@ re_cuts_t *find_re_from_seqs(const char *f, char **enz_cs, int enz_n)
     return re_cuts;
 }
 
-float **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution)
+double **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution)
 {
     if (!re_cuts)
         return 0;
 
     uint32_t i, j, b;
-    float **dens, *ds;
+    double **dens, *ds;
     re_t re;
-    dens = (float **) malloc(re_cuts->n * sizeof(float *));
+    dens = (double **) malloc(re_cuts->n * sizeof(double *));
     for (i = 0; i < re_cuts->n; ++i) {
         re = re_cuts->re[i];
         b = div_ceil(re.l, resolution);
-        ds = (float *) calloc(b, sizeof(float));
+        ds = (double *) calloc(b, sizeof(double));
         for (j = 0; j < re.n; ++j)
-            ds[re.sites[j] / resolution] += 1.0;
+            ds[(MAX(re.sites[j], 1) - 1) / resolution] += 1.;
         for (j = 0; j < b - 1; ++j)
             ds[j] /= (double) resolution * re_cuts->density;
-        ds[b - 1] /= ((double) re.l - (b - 1) * resolution) * re_cuts->density;
-
+        ds[b - 1] /= ((double) re.l - (double) (b - 1) * resolution) * re_cuts->density;
+        
+        for (j = 0; j < b; ++j)
+            if (ds[j] < MIN_RE_DENS || ds[j] > MAX_RE_DENS)
+                ds[j] = .0;
+        
         dens[i] = ds;
 #ifdef DEBUG_ENZ
         printf("DENS [%u/%u] (%u):", i, re_cuts->n, b);
@@ -197,23 +205,23 @@ static uint32_t bin_search(uint32_t *a, uint32_t n, uint32_t s)
     return low;
 } 
 
-float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
+double **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
 {
     if (!re_cuts)
         return 0;
 
     uint32_t i, j, b, n, e, a;
-    float **dens, *ds;
+    double **dens, *ds;
     re_t re;
     sd_aseq_t seq;
     sd_seg_t seg;
     
     n = dict->n;
-    dens = (float **) malloc(n * sizeof(float *));
+    dens = (double **) malloc(n * sizeof(double *));
     for (i = 0; i < n; ++i) {
         seq = dict->s[i];
         b = div_ceil(seq.len, resolution);
-        ds = (float *) calloc(b, sizeof(float));
+        ds = (double *) calloc(b, sizeof(double));
         for (j = 0; j < seq.n; ++j) {
             seg = dict->seg[seq.s + j];
             re = re_cuts->re[seg.c >> 1]; // get seq re cuts
@@ -226,19 +234,23 @@ float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_
             if (seg.c & 1) {
                 // reverse complement
                 while (a < re.n && re.sites[a] < e) {
-                    ds[(seg.a + seg.y - (re.sites[a] - seg.x)) / resolution] += 1.0;
+                    ds[(MAX(seg.a + seg.y - (re.sites[a] - seg.x), 1) - 1) / resolution] += 1.;
                     ++a;
                 }
             } else {
                 while (a < re.n && re.sites[a] < e) {
-                    ds[(seg.a + re.sites[a] - seg.x) / resolution] += 1.0;
+                    ds[(MAX(seg.a + re.sites[a] - seg.x, 1) - 1) / resolution] += 1.;
                     ++a;
                 }
             }
         }
         for (j = 0; j < b - 1; ++j)
             ds[j] /= (double) resolution * re_cuts->density;
-        ds[b - 1] /= ((double) seq.len - (b - 1) * resolution) * re_cuts->density;
+        ds[b - 1] /= ((double) seq.len - (double) (b - 1) * resolution) * re_cuts->density;
+        
+        for (j = 0; j < b; ++j)
+            if (ds[j] < MIN_RE_DENS || ds[j] > MAX_RE_DENS)
+                ds[j] = .0;
         
         dens[i] = ds;
 #ifdef DEBUG_ENZ
@@ -252,24 +264,24 @@ float **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_
     return dens;
 }
 
-float **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
+double **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_t *dict)
 {
     if (!re_cuts)
         return 0;
 
     uint32_t i, j, b, n, e, a;
     uint64_t l, p;
-    float **dens, *ds;
+    double **dens, *ds;
     re_t re;
     sd_aseq_t seq;
     sd_seg_t seg;
     n = dict->n;
-    dens = (float **) malloc(n * sizeof(float *));
+    dens = (double **) malloc(n * sizeof(double *));
     for (i = 0; i < n; ++i) {
         seq = dict->s[i];
         l = seq.len >> 1; // split sequence into two parts
         b = div_ceil(l, resolution);
-        ds = (float *) calloc(b << 1, sizeof(float));
+        ds = (double *) calloc(b << 1, sizeof(double));
         for (j = 0; j < seq.n; ++j) {
             seg = dict->seg[seq.s + j];
             re = re_cuts->re[seg.c >> 1]; // get seq re cuts
@@ -283,27 +295,31 @@ float **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict_
                 while (a < re.n && re.sites[a] < e) {
                     p = seg.a + seg.y - (re.sites[a] - seg.x); // position on seq
                     if (p < l)
-                        ds[p / resolution << 1] += 1.0;
+                        ds[(MAX(p, 1) - 1) / resolution << 1] += 1.;
                     else
-                        ds[ (seq.len - p) / resolution << 1 | 1] += 1.0;
+                        ds[(MAX(seq.len - p, 1) - 1) / resolution << 1 | 1] += 1.;
                     ++a;
                 }
             } else {
                 while (a < re.n && re.sites[a] < e) {
                     p = seg.a + re.sites[a] - seg.x; // position on seq
                     if (p < l)
-                        ds[p / resolution << 1] += 1.0;
+                        ds[(MAX(p, 1) - 1) / resolution << 1] += 1.;
                     else
-                        ds[ (seq.len - p) / resolution << 1 | 1] += 1.0;
+                        ds[(MAX(seq.len - p, 1) - 1) / resolution << 1 | 1] += 1.;
                     ++a;
                 }
             }
         }
         for (j = 0; j < (b - 1) << 1; ++j)
             ds[j] /= (double) resolution * re_cuts->density;
-        ds[(b - 1) << 1] /= ((double) l - (b - 1) * resolution) * re_cuts->density;
-        ds[(b - 1) << 1 | 1] /= ((double) l - (b - 1) * resolution) * re_cuts->density;
+        ds[(b - 1) << 1] /= ((double) l - (double) (b - 1) * resolution) * re_cuts->density;
+        ds[(b - 1) << 1 | 1] /= ((double) l - (double) (b - 1) * resolution) * re_cuts->density;
         
+        for (j = 0; j < b << 1; ++j)
+            if (ds[j] < MIN_RE_DENS || ds[j] > MAX_RE_DENS)
+                 ds[j] = .0;
+
         dens[i] = ds;
 #ifdef DEBUG_ENZ
         printf("DENS2 [%u/%u] (%u):", i, n, b);

@@ -30,10 +30,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "khash.h"
 #include "bamlite.h"
 #include "ketopt.h"
 #include "sdict.h"
 #include "asset.h"
+
+KHASH_SET_INIT_STR(str)
 
 static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scale, int count_gap, FILE *fo)
 {
@@ -43,7 +46,7 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scal
     uint32_t buffer[BUFF_SIZE], m;
     long pair_c;
 
-    sdict_t *sdict = make_sdict_from_index(fai);
+    sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
     fp = fopen(f, "r");
@@ -96,7 +99,12 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     int8_t buff;
     long rec_c, pair_c;
     
-    sdict_t *sdict = make_sdict_from_index(fai);
+    khash_t(str) *hmseq; // for absent sequences
+    khint_t k;
+    int absent;
+    hmseq = kh_init(str);
+
+    sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
     fp = fopen(f, "r");
@@ -121,8 +129,18 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
                 
                 sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
                 sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
-                if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
-                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
+                if (i0 == UINT32_MAX) {
+                    k = kh_put(str, hmseq, cname0, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname0);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                    }
+                } else if(i1 == UINT32_MAX) {
+                    k = kh_put(str, hmseq, cname1, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname1);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                    }
                 } else {
                     if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
                         fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
@@ -145,6 +163,11 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
     
+    for (k = 0; k < kh_end(hmseq); ++k)
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
+    kh_destroy(str, hmseq);
+
     if (line)
         free(line);
     fclose(fp);
@@ -194,8 +217,13 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     uint64_t p0, p1;
     int8_t buff;
     long rec_c, pair_c;
-    
-    sdict_t *sdict = make_sdict_from_index(fai);
+
+    khash_t(str) *hmseq; // for absent sequences
+    khint_t k;
+    int absent;
+    hmseq = kh_init(str);
+
+    sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
     fp = bam_open(f, "r"); // sorted by read name
@@ -229,8 +257,18 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                     sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
                     sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
 
-                    if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
-                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, i0 < 0? cname0 : cname1);
+                    if (i0 == UINT32_MAX) {
+                        k = kh_put(str, hmseq, cname0, &absent);
+                        if (absent) {
+	                        kh_key(hmseq, k) = strdup(cname0);
+	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                        }
+                    } else if (i1 == UINT32_MAX) {
+                        k = kh_put(str, hmseq, cname1, &absent);
+                        if (absent) {
+	                        kh_key(hmseq, k) = strdup(cname1);
+	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                        }
                     } else {
                         if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
                             fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
@@ -259,6 +297,11 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     }
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
+
+    for (k = 0; k < kh_end(hmseq); ++k)
+	if (kh_exist(hmseq, k))
+		free((char *) kh_key(hmseq, k));
+    kh_destroy(str, hmseq);
 
     if (rname0)
         free(rname0);
@@ -479,7 +522,7 @@ int main(int argc, char *argv[])
     int scale;
     uint64_t max_s, scaled_s;
     
-    sdict = make_sdict_from_index(fai);
+    sdict = make_sdict_from_index(fai, 0);
     scale = 0;
     max_s = scaled_s = 0;
     agp1 = (char *) malloc(MAX(strlen(agp), out? strlen(out) : 0) + 35);
