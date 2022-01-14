@@ -1,4 +1,4 @@
-# YaHS: yet another Hi-C scaffolding tool
+# YaHS: yet another Hi-C scaffolding tool [![DOI](https://zenodo.org/badge/411044095.svg)](https://zenodo.org/badge/latestdoi/411044095)
 
 ## Overview
 YaHS is scaffolding tool using Hi-C data. It relies on a new algothrim for contig joining detection which considers the topological distribution of Hi-C signals aiming to distingush real interaction signals from mapping nosies. YaHS has been tested in a wide range of genome assemblies. Compared to other Hi-C scaffolding tools, it usually generates more contiguous scaffolds - especially with a higher N90 and L90 statistics. It is also super fast - takes less than 5 minutes to reconstruct the human genome from an assembly of 5,483 contigs with ~45X Hi-C data. See the [poster](https://drive.google.com/file/d/1jPhSi1k4ROGb1OSfKDurFIUvn-x1G6Kg/view?usp=sharing) presented in the [Bioversity Genemics 2021 conference](https://www.darwintreeoflife.org/news_item/biodiversity-genomics-2021-sequencing-genomes-across-the-planet/) for more information.
