@@ -531,7 +531,7 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a FILE           AGP file (for rescaffolding) [none]\n");
     fprintf(fp_help, "    -r INT[,INT,...]  list of resolutions in ascending order [automate]\n");
-    //fprintf(fp_help, "    -e STR            restriction enzyme cutting sites [none]\n");
+    fprintf(fp_help, "    -e STR            restriction enzyme cutting sites [none]\n");
     fprintf(fp_help, "    -l INT            minimum length of a contig to scaffold [0]\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");

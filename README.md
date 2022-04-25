@@ -23,9 +23,15 @@ With `-a` option, you can specify a AGP format file to ask YaHS to do scaffoldin
 
 With `-r` option, you can specify a range of resultions. It is `50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000` by default and the upper limit is automatically adjusted with the genome size.
 
+With `-e` option, you can specify the restriction enzyme(s) used by the Hi-C experiment. For example, `GATC` for the DpnII restriction enzyme used by the Dovetail Hi-C Kit; `GATC,GANT` and `CGATC,GANTC,CTNAG,TTAA` for Arima genomics 2-enzyme and 4-enzyme protocol, respectively. Sometimes, the specification of enzymes may not change the scaffolding result very much if not make it worse, especically when the base quality of the assembly is not very good, e.g., assembies constructed from noisy long reads.
+
+With `-l` option, you can specify the minimum contig length included for scaffolding.
+
+With `-q` option, you can set the minimum read mapping quality (for BAM input only).
+
 With `--no-contig-ec` option, you can skip the initial assembly error correction step. With `-a` option, this will be set automatically.
 
-With `--no-scaffold-ec` option, YaHS will skip the scaffolding error check in each round. There will no `*_r[0-9]{2}_break.agp` AGP output files.
+With `--no-scaffold-ec` option, YaHS will skip the scaffolding error check in each round. There will be no `*_r[0-9]{2}_break.agp` AGP output files.
 
 ## Generate HiC contact maps
 YaHS offers some auxiliary tools to help generating HiC contact maps for visualisation. A demo is provided in the bash script `scripts/run_yahs.sh`. To generate and visualise a HiC contact map, the following tools are required.
