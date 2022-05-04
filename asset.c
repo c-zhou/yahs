@@ -33,8 +33,11 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include <sys/sysctl.h>
 
 #include "asset.h"
+
+#define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 double cputime(void)
 {
@@ -61,6 +64,56 @@ double realtime(void)
     return tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
+long physmem_total(void)
+{
+    #if defined _SC_PHYS_PAGES && defined _SC_PAGESIZE
+    {
+        /* This works on linux-gnu, solaris2 and cygwin */
+        long pages = sysconf(_SC_PHYS_PAGES);
+        long pagesize = sysconf(_SC_PAGESIZE);
+        if (0 <= pages && 0 <= pagesize)
+        return pages * pagesize;
+    }
+    #elif defined CTL_HW && defined HW_PHYSMEM
+    { 
+        /* This works on *bsd and darwin */
+        unsigned int physmem;
+        size_t len = sizeof physmem;
+        static int mib[2] = { CTL_HW, HW_PHYSMEM };
+        if (sysctl (mib, ARRAY_SIZE(mib), &physmem, &len, NULL, 0) == 0
+            && len == sizeof (physmem))
+        return physmem;
+    }
+    #endif
+
+    return 0;
+}
+
+long physmem_avail(void)
+{
+    #if defined _SC_AVPHYS_PAGES && defined _SC_PAGESIZE
+    {
+        /* This works on linux-gnu, solaris2 and cygwin */
+        long pages = sysconf(_SC_AVPHYS_PAGES);
+        long pagesize = sysconf(_SC_PAGESIZE);
+        if (0 <= pages && 0 <= pagesize)
+        return pages * pagesize;
+    }
+    #elif defined CTL_HW && defined HW_USERMEM
+    {
+        /* This works on *bsd and darwin */
+        unsigned int usermem;
+        size_t len = sizeof usermem;
+        static int mib[2] = { CTL_HW, HW_USERMEM };
+        if (sysctl (mib, ARRAY_SIZE(mib), &usermem, &len, NULL, 0) == 0
+            && len == sizeof (usermem))
+        return usermem;
+    }
+    #endif
+
+    return 0;
+}
+
 void ram_limit(long *total, long *avail)
 {
     long t, a, a1;
@@ -69,9 +122,11 @@ void ram_limit(long *total, long *avail)
     a = lim.rlim_cur;
     getrlimit(RLIMIT_AS, &lim);
     a = MAX(a, (long) lim.rlim_cur);
-    a1 = (long) (sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE));
+    // a1 = (long) (sysconf(_SC_AVPHYS_PAGES) * sysconf(_SC_PAGESIZE));
+    a1 = physmem_avail();
     a = a > 0? MIN(a, a1) : a1;
-    t = sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
+    // t = sysconf(_SC_PHYS_PAGES) * sysconf(_SC_PAGESIZE);
+    t = physmem_total();
     *avail = a;
     *total = t;
 }
