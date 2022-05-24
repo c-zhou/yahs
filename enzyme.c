@@ -279,7 +279,7 @@ double **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict
     dens = (double **) malloc(n * sizeof(double *));
     for (i = 0; i < n; ++i) {
         seq = dict->s[i];
-        l = seq.len >> 1; // split sequence into two parts
+        l = div_ceil(seq.len, 2); // split sequence into two parts
         b = div_ceil(l, resolution);
         ds = (double *) calloc(b << 1, sizeof(double));
         for (j = 0; j < seq.n; ++j) {
