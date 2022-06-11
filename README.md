@@ -40,24 +40,59 @@ YaHS offers some auxiliary tools to help generating HiC contact maps for visuali
 * juicer_tools: https://github.com/aidenlab/juicer/wiki/Download
 * Juicebox: https://github.com/aidenlab/Juicebox
 
-The first step is to convert the HiC alignment file (BAM/BED/BIN) to a file required by `juicer_tools` using the tool `juicer_pre` provided by YaHS. To save time, BIN file is recommended which has already been generated in the scaffolding step. Here is an example bash command:
+The first step is to convert the HiC alignment file (BAM/BED/BIN) to a file required by `juicer_tools` using the tool `juicer pre` provided by YaHS. To save time, BIN file is recommended which has already been generated in the scaffolding step. Here is an example bash command:
 
-    (juicer_pre hic-to-contigs.bin scaffolds_final.agp contigs.fa.fai | sort -k2,2d -k6,6d -T ./ --parallel=8 -S32G | awk 'NF' > alignments_sorted.txt.part) && (mv alignments_sorted.txt.part alignments_sorted.txt)
+    (juicer pre hic-to-contigs.bin scaffolds_final.agp contigs.fa.fai | sort -k2,2d -k6,6d -T ./ --parallel=8 -S32G | awk 'NF' > alignments_sorted.txt.part) && (mv alignments_sorted.txt.part alignments_sorted.txt)
 
-The tool `juicer_pre` takes three positional parameters: the alignments of HiC reads to contigs, the scaffold AGP file and the contig FASTA index file. With `-o` option, it will write the results to a file. Here, the outputs are directed to `stdout` as we need a sorted (by scaffold names) file for `juicer_tools`.
+The tool `juicer pre` takes three positional parameters: the alignments of HiC reads to contigs, the scaffold AGP file and the contig FASTA index file. With `-o` option, it will write the results to a file. Here, the outputs are directed to `stdout` as we need a sorted (by scaffold names) file for `juicer_tools`.
 
 For sorting, we use 8 threads, 32Gb memory and the current directory for temporaries. You might need to adjust these settings according to your device.
 
 The next step is to generate HiC contact matrix using `juicer_tools`. Here is an example bash command:
 
-    (java -jar -Xmx32G juicer_tools_1.22.01.jar pre --threads 12 alignments_sorted.txt out.hic.part scaffolds_final.chrom.sizes) && (mv out.hic.part out.hic) && (rm alignments_sorted.txt)
+    (java -jar -Xmx32G juicer_tools.1.9.9_jcuda.0.8.jar pre alignments_sorted.txt out.hic.part scaffolds_final.chrom.sizes) && (mv out.hic.part out.hic)
 
 The `juicer_tools`'s `pre` command takes three positional parameters: the sorted alignment file generated in the first step, the output file name and the file for scaffold sizes. The file for scaffold sizes should contain two columns - scaffold name and scaffold size, which can be taken from the first two columns of the FASTA index file.
 
 Finally, the output file `out.hic` could be used for visualisation with Juicebox. More information about `juicer_tools` and Juicebox can be found [here]( https://github.com/aidenlab/juicer/wiki/Juicer-Tools-Quick-Start).
 
+## Manual curation with Juicebox (JBAT)
+You can generate a HiC file that can be loaded by Juicebox (JBAT) for manual editing with `juicer pre` by adding `-a` parameter. For example, 
+    
+    juicer pre -a -o out_JBAT hic-to-contigs.bin scaffolds_final.agp contigs.fa.fai >out_JBAT.log 2>&1
+    
+where `hic-to-contigs.bin` (can be replaced with the original BED/BAM file with some sacrifice in running time) and `scaffolds_final.agp` are the outputs of YaHS. This results in five output files,
+
+    out_JBAT.txt             - BED format file for hic links
+    out_JBAT.liftover.agp    - coordinate file between new and old contigs
+    out_JBAT.assembly        - assembly annotation file for Juicebox
+    out_JBAT.assembly.agp    - AGP file contains same information as the assembly annotation file. Not a real AGP file as there are no gaps.
+    out_JBAT.log             - the output log file
+   
+You will then need to run `juicer_tools pre` with `out_JBAT.txt` file.
+
+    (java -jar -Xmx32G juicer_tools.1.9.9_jcuda.0.8.jar pre out_JBAT.txt out_JBAT.hic.part <(cat out_JBAT.log  | grep PRE_C_SIZE | awk '{print $2" "$3}')) && (mv out_JBAT.hic.part out_JBAT.hic)
+
+There will be a line like `[I::main_pre] JUICER_PRE CMD: java -Xmx36G -jar ${juicer_tools} pre out_JBAT.txt out_JBAT.hic <(echo "assembly 183277074")` in the `out_JBAT.log` file telling you how to run juicer_tools. The `<(echo "assembly 183277074")` part can be replaced by a chromosome size file containing only one line - assembly 183277074.
+
+The `out_JBAT.hic` can be loaded into Juicebox along with `out_JBAT.assembly` for manual editing.
+> **_NOTE:_**  if your total assembly size is larger than 2Gb, there will be a scale factor to make the HiC file loadable by Juicebox. This scale factor can be found in the log file (out_JBAT.log) and always a power of 2, e. g. `[I::main_pre] scale factor: 4`. You need to set this parameter in Juicebox through `Assembly > Set Scale`. Otherwise the HiC contact map and assembly file will not match.
+    
+Once completed, there should be a file named something like `out_JBAT.review.assembly` generated by Juicebox, which can be fed into `jucicer post` command to generate AGP and FASTA files for the final genome assembly. You also need the `out_JBAT.liftover.agp` coordinate file generated with `juicer pre` command.
+
+    juicer post -o out_JBAT out_JBAT.review.assembly out_JBAT.liftover.agp contigs.fa
+
+This will end up with two files `out_JBAT.FINAL.agp` and `out_JBAT.FINAL.fa`. Together with `hic-to-contigs.bin` or the original BED/BAM file, you can regenerate HiC a contact map for the final assembly as described in the previous section.
+
+You can find more information about mannual editing with Juicebox here [Issue 4](https://github.com/c-zhou/yahs/issues/4).
+
 ## Other tools
+* ***juicer*** is a tool used to quickly generate HiC alignment file required for HiC contact map generation with tools like [Juicebox](https://github.com/aidenlab/Juicebox), [PretextMap](https://github.com/wtsi-hpag/PretextMap) and [Higlass](https://github.com/higlass/higlass) (`juicer pre`). It can be also used to generate AGP and FASTA files after manual editing with Juicebox JBAT (`juicer post`).
 * ***agp_to_fasta*** creates a FASTA file from a AGP file. It takes two positional parameters: the AGP file and the contig FASTA file. By default, the output will be directed to `stdout`. You can write to a file with `-o` option. It also allows changing the FASTA line width with `-l` option, which by default is 60. 
 
 ## Limitations
 YaHS is still under development and only tested with genome assemblies limited to a few species. You are welcomed to use it and report failures. Any suggestions would be appreciated.
+
+## Citation
+
+Chenxi Zhou, Shane A. McCarthy, Richard Durbin. YaHS: yet another Hi-C scaffolding tool. 2022. bioRxiv doi: https://doi.org/10.1101/2022.06.09.495093
