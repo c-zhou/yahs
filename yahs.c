@@ -50,8 +50,6 @@
 #undef DEBUG_ENZ
 #undef DEBUG_GT4G
 
-#define YAHS_VERSION "1.1a"
-
 #define ENOMEM_ERR 15
 #define ENOBND_ERR 14
 #define GB 0x40000000

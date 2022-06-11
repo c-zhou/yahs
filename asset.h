@@ -32,6 +32,8 @@
 
 #include <stdint.h>
 
+#define YAHS_VERSION "1.1a"
+
 #define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))

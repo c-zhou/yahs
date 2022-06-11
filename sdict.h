@@ -101,6 +101,7 @@ void add_unplaced_short_seqs(asm_dict_t *d, uint32_t min_len);
 char *get_asm_seq(asm_dict_t *d, char *name);
 uint32_t asm_sd_get(asm_dict_t *d, const char *name);
 int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap);
+int sd_coordinate_rev_conversion(asm_dict_t *d, uint32_t id, uint64_t pos, uint32_t *s, uint32_t *p, int count_gap);
 void sd_stats(sdict_t *d, uint64_t *n_stats, uint32_t *l_stats);
 void asm_sd_stats(asm_dict_t *d, uint64_t *n_stats, uint32_t *l_stats);
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd);

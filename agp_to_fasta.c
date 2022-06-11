@@ -96,7 +96,7 @@ int main(int argc, char *argv[])
 
     fo = out == 0? stdout : fopen(out, "w");
     if (fo == 0) {
-        fprintf(stderr, "[E::%s] cannot open fail %s for writing\n", __func__, out);
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
     

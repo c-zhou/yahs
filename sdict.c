@@ -439,6 +439,9 @@ void add_unplaced_short_seqs(asm_dict_t *d, uint32_t min_len)
     asm_index(d);
 }
 
+
+/* contig coordinates to scaffold coordinates */
+// one-based
 int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap)
 {
     if (id == UINT32_MAX) {
@@ -452,9 +455,46 @@ int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t 
         ++i;
     sd_seg_t seg = d->seg[(uint32_t) index[i]];
     *s = seg.s;
-    *p = seg.c & 1? seg.a + seg.x + seg.y - pos : seg.a + pos - seg.x;
+    *p = seg.c & 1? seg.a + seg.x + seg.y - pos + 1 : seg.a + pos - seg.x;
     if (count_gap)
         *p = *p + seg.k * GAP_SZ;
+    return 0;
+}
+
+/* scaffold coordinates to contig coordinates */
+// one-based
+int sd_coordinate_rev_conversion(asm_dict_t *d, uint32_t id, uint64_t pos, uint32_t *s, uint32_t *p, int count_gap)
+{
+    if (id == UINT32_MAX) {
+        *s = UINT32_MAX;
+        return 1;    
+    }
+
+    sd_seg_t *seg = d->seg + d->s[id].s;
+    uint32_t n = d->s[id].n;
+    int64_t l = pos;
+
+    uint32_t i = 0;
+    int in_gap = 0;
+    while (i < n && l > 0) {
+        l -= seg[i].y;
+        in_gap = 0;
+        ++i;
+        if (count_gap && i < n && l > 0) {
+            l -= GAP_SZ;
+            in_gap = 1;
+        }
+    }
+    
+    if (l > 0 || in_gap) {
+        *s = UINT32_MAX;
+        return 1;
+    }
+
+    --i;
+    *s = seg[i].c >> 1;
+    *p = seg[i].c & 1? seg[i].x - l + 1 : seg[i].x + seg[i].y + l;
+
     return 0;
 }
 

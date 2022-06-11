@@ -1292,7 +1292,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 
     fp = bam_open(f, "r"); // sorted by read name
     if (fp == NULL) {
-        fprintf(stderr, "[E::%s] cannot open fail %s for reading\n", __func__, f);
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
     
@@ -1329,14 +1329,14 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                     if (i0 == UINT32_MAX) {
                         k = kh_put(str, hmseq, cname0, &absent);
                         if (absent) {
-	                        kh_key(hmseq, k) = strdup(cname0);
-	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                            kh_key(hmseq, k) = strdup(cname0);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
                         }
                     } else if (i1 == UINT32_MAX) {
                         k = kh_put(str, hmseq, cname1, &absent);
                         if (absent) {
-	                        kh_key(hmseq, k) = strdup(cname1);
-	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                            kh_key(hmseq, k) = strdup(cname1);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                         }
                     } else {
                         if (i0 == i1)
@@ -1376,8 +1376,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     }
 
     for (k = 0; k < kh_end(hmseq); ++k)
-	if (kh_exist(hmseq, k))
-		free((char *) kh_key(hmseq, k));
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
     if (rname0)
@@ -1441,14 +1441,14 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                 if (i0 == UINT32_MAX) {
                     k = kh_put(str, hmseq, cname0, &absent);
                     if (absent) {
-	                    kh_key(hmseq, k) = strdup(cname0);
-	                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                        kh_key(hmseq, k) = strdup(cname0);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
                     }
                 } else if (i1 == UINT32_MAX) {
                     k = kh_put(str, hmseq, cname1, &absent);
                     if (absent) {
-	                    kh_key(hmseq, k) = strdup(cname1);
-	                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                        kh_key(hmseq, k) = strdup(cname1);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else {
                     if (i0 == i1)
@@ -1481,8 +1481,8 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     }
 
     for (k = 0; k < kh_end(hmseq); ++k)
-	if (kh_exist(hmseq, k))
-		free((char *) kh_key(hmseq, k));
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
     if (line)

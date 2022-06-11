@@ -228,7 +228,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
 
     fp = bam_open(f, "r"); // sorted by read name
     if (fp == NULL) {
-        fprintf(stderr, "[E::%s] cannot open fail %s for reading\n", __func__, f);
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
 
@@ -260,14 +260,14 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                     if (i0 == UINT32_MAX) {
                         k = kh_put(str, hmseq, cname0, &absent);
                         if (absent) {
-	                        kh_key(hmseq, k) = strdup(cname0);
-	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                            kh_key(hmseq, k) = strdup(cname0);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
                         }
                     } else if (i1 == UINT32_MAX) {
                         k = kh_put(str, hmseq, cname1, &absent);
                         if (absent) {
-	                        kh_key(hmseq, k) = strdup(cname1);
-	                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                            kh_key(hmseq, k) = strdup(cname1);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                         }
                     } else {
                         if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
@@ -299,8 +299,8 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
 
     for (k = 0; k < kh_end(hmseq); ++k)
-	if (kh_exist(hmseq, k))
-		free((char *) kh_key(hmseq, k));
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
     if (rname0)
@@ -375,10 +375,11 @@ static uint64_t assembly_annotation(const char *f, const char *out_agp, const ch
         cstart = strtoul(cstarts, NULL, 10);
         cend = strtoul(cends, NULL, 10);
         l = cend - cstart + 1;
-        l = l >> *scale;
+        // l = l >> *scale;
         ++c;
         fprintf(fo_annot, ">ctg%08u.1 %u %u\n", c, c, l);
-        fprintf(fo_lift, "ctg%08u.1 %s %u %u\n", c, cname, cstart, cend);
+        // fprintf(fo_lift, "ctg%08u.1 %s %u %u\n", c, cname, cstart, cend);
+        fprintf(fo_lift, "ctg%08u.1\t%u\t%u\t%u\tW\t%s\t%u\t%u\t+\n", c, 1, l, 1, cname, cstart, cend);
         seqs[c + s - 1] = c * (strncmp(oris, "+", 1)? -1 : 1);
     }
     uint32_t i;
@@ -426,9 +427,9 @@ uint64_t assembly_scale_max_seq(asm_dict_t *dict, int *scale, uint64_t max_s, ui
     return linear_scale(s, scale, max_s);
 }
 
-static void print_help(FILE *fp_help)
+static void print_help_pre(FILE *fp_help)
 {
-    fprintf(fp_help, "Usage: juicer_pre [options] <hic.bed>|<hic.bam>|<hic.bin> <scaffolds.agp> <contigs.fa.fai>\n");
+    fprintf(fp_help, "Usage: juicer pre [options] <hic.bed>|<hic.bam>|<hic.bin> <scaffolds.agp> <contigs.fa.fai>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a                preprocess for assembly mode\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
@@ -440,10 +441,10 @@ static ko_longopt_t long_options[] = {
     { 0, 0, 0 }
 };
 
-int main(int argc, char *argv[])
+static int main_pre(int argc, char *argv[])
 {
-    if (argc < 2) {
-        print_help(stderr);
+    if (argc < 4) {
+        print_help_pre(stderr);
         return 1;
     }
 
@@ -478,7 +479,7 @@ int main(int argc, char *argv[])
     }
 
     if (fp_help == stdout) {
-        print_help(stdout);
+        print_help_pre(stdout);
         return 0;
     }
 
@@ -489,7 +490,7 @@ int main(int argc, char *argv[])
 
     if (argc - opt.ind < 3) {
         fprintf(stderr, "[E::%s] missing input: three positional options required\n", __func__);
-        print_help(stderr);
+        print_help_pre(stderr);
         return 1;
     }
     
@@ -512,7 +513,7 @@ int main(int argc, char *argv[])
 
     fo = out1 == 0? stdout : fopen(out1, "w");
     if (fo == 0) {
-        fprintf(stderr, "[E::%s] cannot open fail %s for writing\n", __func__, out);
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
     ret = 0;
@@ -531,7 +532,7 @@ int main(int argc, char *argv[])
         lift = (char *) malloc(strlen(out) + 35);
         sprintf(agp1, "%s.assembly.agp", out);
         sprintf(annot, "%s.assembly", out);
-        sprintf(lift, "%s.liftover", out);
+        sprintf(lift, "%s.liftover.agp", out);
         scaled_s = assembly_annotation(agp, agp1, annot, lift, &scale, (uint64_t) INT_MAX, &max_s);
         dict = make_asm_dict_from_agp(sdict, agp1);
     } else {
@@ -557,7 +558,7 @@ int main(int argc, char *argv[])
 
     if (asm_mode) {
         fprintf(stderr, "[I::%s] genome size: %lu\n", __func__, max_s);
-        fprintf(stderr, "[I::%s] scale factor: %d\n", __func__, scale);
+        fprintf(stderr, "[I::%s] scale factor: %d\n", __func__, 1 << scale);
         fprintf(stderr, "[I::%s] chromosome sizes for juicer_tools pre -\n", __func__);
         fprintf(stderr, "PRE_C_SIZE: assembly %lu\n", scaled_s);
         fprintf(stderr, "[I::%s] JUICER_PRE CMD: java -Xmx36G -jar ${juicer_tools} pre %s %s.hic <(echo \"assembly %lu\")\n", __func__, out1, out, scaled_s);
@@ -594,4 +595,212 @@ int main(int argc, char *argv[])
         free(lift);
 
     return ret;
+}
+
+static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
+{
+    asm_dict_t *dict;
+    FILE *fp;
+
+    fp = fopen(assembly, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
+        exit(EXIT_FAILURE);
+    }
+
+    dict = make_asm_dict_from_agp(sdict, lift);
+
+    
+    char *line = NULL;
+    size_t ln = 0;
+    ssize_t read;
+    char cname[1024], c0[1024], c1[1024], *cstr;
+    int32_t cid, sid, fid, sign;
+    uint32_t clen, mlen, s, p, *coords;
+    int64_t slen;
+    size_t m;
+
+    m = 4;
+    coords = (uint32_t *) malloc(sizeof(uint32_t) * m * 3);
+    c0[0] = c1[0] = '\0';
+    mlen = 0;
+    sid = 0;
+
+    while ((read = getline(&line, &ln, fp)) != -1) {
+        if (line[0] == '>') {
+            sscanf(line, "%s %d %u", cname, &cid, &clen);
+            cstr = strstr(cname, ":::");
+            if (cstr != NULL) {
+                cname[cstr - cname] = '\0';
+            }
+            strcpy(c1, cname + 1);
+            
+            if (!strcmp(c0, c1)) {
+                mlen += clen;
+            } else {
+                mlen = clen;
+                strcpy(c0, c1);
+            }
+
+            if (sd_coordinate_rev_conversion(dict, asm_sd_get(dict, c1), mlen - clen + 1, &s, &p, 0)) {
+                fprintf(stderr, "[E::%s] coordinates conversion error %s %u\n", __func__, c1, mlen - clen + 1);
+                exit(EXIT_FAILURE);
+            }
+            
+            if (cid > m) {
+                m <<= 1;
+                coords = (uint32_t *) realloc(coords, sizeof(uint32_t) * m * 3);
+            }
+
+            cid -= 1;
+            coords[cid * 3] = s;
+            coords[cid * 3 + 1] = p;
+            coords[cid * 3 + 2] = clen;
+        } else {
+            ++sid;
+            fid = 0;
+            slen = 0;
+
+            char  *eptr, *fptr;
+            
+            cid = strtol(line, &eptr, 10);
+            sign = cid > 0;
+            cid = abs(cid) - 1;
+            fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tW\t%s\t%d\t%d\t%c\n", sid, slen + 1, slen + coords[cid * 3 + 2], ++fid, sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1, "-+"[sign]);
+            slen += coords[cid * 3 + 2];
+            while (*eptr != '\n') {
+                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tN\t%d\tscaffold\tyes\tna\n", sid, slen + 1, slen + GAP_SZ, ++fid, GAP_SZ);
+                slen += GAP_SZ;
+                
+                cid = strtol(eptr + 1, &fptr, 10);
+                sign = cid > 0;
+                cid = abs(cid) - 1;
+                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tW\t%s\t%d\t%d\t%c\n", sid, slen + 1, slen + coords[cid * 3 + 2], ++fid, sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1, "-+"[sign]);
+                slen += coords[cid * 3 + 2];
+
+                eptr = fptr;
+            }
+        }
+    }
+    
+    fclose(fp);
+
+    asm_destroy(dict);
+
+    free(coords);
+
+    return 0;
+}
+
+static void print_help_post(FILE *fp_help)
+{
+    fprintf(fp_help, "Usage: juicer post [options] <review.assembly> <liftover.agp> <contigs.fa[.fai]>\n");
+    fprintf(fp_help, "Options:\n");
+    fprintf(fp_help, "    -o STR            output file prefix (required for scaffolds FASTA output) [stdout]\n");
+}
+
+static int main_post(int argc, char *argv[])
+{
+    if (argc < 4) {
+        print_help_post(stderr);
+        return 1;
+    }
+    
+    FILE *fo;
+    char *fa, *fa1, *out, *out1;
+    const char *opt_str = "o:h";
+    ketopt_t opt = KETOPT_INIT;
+    int c, ret, is_fai;
+    FILE *fp_help = stderr;
+    sdict_t *sdict;
+    fa = fa1 = out = out1 = 0;
+
+    while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
+        if (c == 'o') {
+            out = opt.arg;
+        } else if (c == 'h') {
+            fp_help = stdout;
+        } else if (c == '?') {
+            fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
+            return 1;
+        } else if (c == ':') {
+            fprintf(stderr, "[E::%s] missing option: \"%s\"\n", __func__, argv[opt.i - 1]);
+            return 1;
+        }
+    }
+
+    if (fp_help == stdout) {
+        print_help_post(stdout);
+        return 0;
+    }
+
+    if (out) {
+        out1 = (char *) malloc(strlen(out) + 35);
+        sprintf(out1, "%s.FINAL.agp", out);
+    }
+
+    fo = out1 == 0? stdout : fopen(out1, "w");
+    if (fo == 0) {
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
+        exit(EXIT_FAILURE);
+    }
+
+    fa = argv[opt.ind + 2];
+    is_fai = strlen(fa) > 4 && !strcmp(fa + strlen(fa) - 4, ".fai");
+
+    ret = 0;
+    sdict = is_fai? make_sdict_from_index(fa, 0) : make_sdict_from_fa(fa, 0);
+    ret = assembly_to_agp(argv[opt.ind], argv[opt.ind + 1], sdict, fo);
+    fflush(fo);
+    if (out != 0)
+        fclose(fo);
+
+    if (!ret && !is_fai && out1) {
+        fa1 = (char *) malloc(strlen(out) + 35);
+        sprintf(fa1, "%s.FINAL.fa", out);
+        fprintf(stderr, "[I::%s] writing FASTA file for scaffolds\n", __func__);
+        FILE *fo1;
+        fo1 = fopen(fa1, "w");
+        if (fo1 == NULL) {
+            fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, fa1);
+            exit(EXIT_FAILURE);
+        }
+        write_fasta_file_from_agp(fa, out1, fo1, 60);
+        fclose(fo1);
+    }
+
+    sd_destroy(sdict);
+
+    if (out1)
+        free(out1);
+
+    if (fa1)
+        free(fa1);
+
+    return ret;
+}
+
+static int usage()
+{
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Usage:   juicer <command> <arguments>\n");
+    fprintf(stderr, "Version: %s\n\n", YAHS_VERSION);
+    fprintf(stderr, "Command: pre       generate files compatible with Juicebox toolset\n");
+    fprintf(stderr, "         post      generate assembly files after Juicebox curation\n");
+    fprintf(stderr, "\n");
+    return 1;
+}
+
+int main(int argc, char *argv[])
+{
+    if (argc == 1)
+        return usage();
+    if (strcmp(argv[1], "pre") == 0)
+        return main_pre(argc - 1, argv + 1);
+    if (strcmp(argv[1], "post") == 0)
+        return main_post(argc - 1, argv + 1);
+    else {
+        fprintf(stderr, "[E::%s] unrecognized command '%s'. Abort!\n", __func__, argv[1]);
+        return 1;
+    }
 }
