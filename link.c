@@ -1271,6 +1271,19 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
     return strdup(bam1_qname(b));
 }
 
+static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
+{
+    // 0x4 0x8 0x40 0x100 0x400 0x800
+    if (b->core.flag & 0xD4C)
+        return 0;
+    *cname0 = h->target_name[b->core.tid];
+    *s0 = b->core.pos + 1;
+    *cname1 = h->target_name[b->core.mtid];
+    *s1 = b->core.mpos + 1;
+
+    return bam1_qname(b);
+}
+
 void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out)
 {
     bamFile fp;
@@ -1282,6 +1295,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     uint32_t i0, i1, p0, p1;
     int8_t buff;
     long rec_c, pair_c, inter_c, intra_c;
+    enum bam_sort_order so;
     
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -1289,8 +1303,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     hmseq = kh_init(str);
 
     sdict_t *dict = make_sdict_from_index(fai, ml);
-
-    fp = bam_open(f, "r"); // sorted by read name
+    
+    fp = bam_open(f, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -1304,75 +1318,125 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 
     h = bam_header_read(fp);
     b = bam_init1();
+    so = bam_hrecs_sort_order(h);
     cname0 = cname1 = rname0 = rname1 = 0;
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = p0 = p1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
-    while (bam_read1(fp, b) >= 0 ) {
-        if (buff == 0) {
-            rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
-            if (!rname0)
-                continue;
-            ++buff;
-        } else if (buff == 1) {
-            rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
-            if (!rname1)
-                continue;
-            if (strcmp(rname0, rname1) == 0) {
-                ++pair_c;
 
-                if (s0 > 0 && s1 > 0) {
-                    i0 = sd_get(dict, cname0);
-                    i1 = sd_get(dict, cname1);
+    if (so == ORDER_NAME) {
+        // sorted by read names
+        while (bam_read1(fp, b) >= 0 ) {
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
-                    if (i0 == UINT32_MAX) {
-                        k = kh_put(str, hmseq, cname0, &absent);
-                        if (absent) {
-                            kh_key(hmseq, k) = strdup(cname0);
-                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+            if (buff == 0) {
+                rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
+                if (!rname0)
+                    continue;
+                ++buff;
+            } else if (buff == 1) {
+                rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
+                if (!rname1)
+                    continue;
+                if (strcmp(rname0, rname1) == 0) {
+                    ++pair_c;
+
+                    if (s0 > 0 && s1 > 0) {
+                        i0 = sd_get(dict, cname0);
+                        i1 = sd_get(dict, cname1);
+
+                        if (i0 == UINT32_MAX) {
+                            k = kh_put(str, hmseq, cname0, &absent);
+                            if (absent) {
+                                kh_key(hmseq, k) = strdup(cname0);
+                                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                            }
+                        } else if (i1 == UINT32_MAX) {
+                            k = kh_put(str, hmseq, cname1, &absent);
+                            if (absent) {
+                                kh_key(hmseq, k) = strdup(cname1);
+                                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                            }
+                        } else {
+                            if (i0 == i1)
+                                ++intra_c;
+                            else
+                                ++inter_c;
+                            p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
+                            p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
+                            if (i0 > i1) {
+                                SWAP(uint32_t, i0, i1);
+                                SWAP(uint32_t, p0, p1);
+                            }
+                            fwrite(&i0, sizeof(uint32_t), 1, fo);
+                            fwrite(&p0, sizeof(uint32_t), 1, fo);
+                            fwrite(&i1, sizeof(uint32_t), 1, fo);
+                            fwrite(&p1, sizeof(uint32_t), 1, fo);
                         }
-                    } else if (i1 == UINT32_MAX) {
-                        k = kh_put(str, hmseq, cname1, &absent);
-                        if (absent) {
-                            kh_key(hmseq, k) = strdup(cname1);
-                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
-                        }
-                    } else {
-                        if (i0 == i1)
-                            ++intra_c;
-                        else
-                            ++inter_c;
-                        p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
-                        p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
-                        if (i0 > i1) {
-                            SWAP(uint32_t, i0, i1);
-                            SWAP(uint32_t, p0, p1);
-                        }
-                        fwrite(&i0, sizeof(uint32_t), 1, fo);
-                        fwrite(&p0, sizeof(uint32_t), 1, fo);
-                        fwrite(&i1, sizeof(uint32_t), 1, fo);
-                        fwrite(&p1, sizeof(uint32_t), 1, fo);
                     }
+                    free(rname0);
+                    free(rname1);
+                    rname0 = 0;
+                    rname1 = 0;
+                    buff = 0;
+                } else {
+                    cname0 = cname1;
+                    s0 = s1;
+                    e0 = e1;
+                    free(rname0);
+                    rname0 = rname1;
+                    rname1 = 0;
+                    buff = 1;
                 }
-                free(rname0);
-                free(rname1);
-                rname0 = 0;
-                rname1 = 0;
-                buff = 0;
-            } else {
-                cname0 = cname1;
-                s0 = s1;
-                e0 = e1;
-                free(rname0);
-                rname0 = rname1;
-                rname1 = 0;
-                buff = 1;
             }
         }
+    } else {
+        // sorted by coordinates or others
+        if (mq > 0)
+            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hu suppressed \n", __func__, mq);
+        
+        while (bam_read1(fp, b) >= 0 ) {
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+            if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
+                continue;
+
+            ++pair_c;
+            if (s0 > 0 && s1 > 0) {
+                i0 = sd_get(dict, cname0);
+                i1 = sd_get(dict, cname1);
+
+                if (i0 == UINT32_MAX) {
+                    k = kh_put(str, hmseq, cname0, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname0);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                    }
+                } else if (i1 == UINT32_MAX) {
+                    k = kh_put(str, hmseq, cname1, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname1);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                    }
+                } else {
+                    if (i0 == i1)
+                        ++intra_c;
+                    else
+                        ++inter_c;
+                    if (i0 > i1) {
+                        SWAP(uint32_t, i0, i1);
+                        SWAP(uint32_t, s0, s1);
+                    }
+                    fwrite(&i0, sizeof(uint32_t), 1, fo);
+                    fwrite(&s0, sizeof(uint32_t), 1, fo);
+                    fwrite(&i1, sizeof(uint32_t), 1, fo);
+                    fwrite(&s1, sizeof(uint32_t), 1, fo);
+                }
+            }
+        }
     }
 
     for (k = 0; k < kh_end(hmseq); ++k)

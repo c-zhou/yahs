@@ -32,8 +32,6 @@
 
 #include <stdint.h>
 
-#define YAHS_VERSION "1.1a"
-
 #define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
@@ -46,6 +44,7 @@ extern "C" {
 
 double realtime(void);
 double cputime(void);
+void liftrlimit();
 long peakrss(void);
 void ram_limit(long *total, long *avail);
 int file_copy(char *fin, char *fout);

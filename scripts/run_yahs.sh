@@ -16,12 +16,12 @@ hicaln="./data/test.bed" # could be .bed, .bam or .bin file
 ## output file will be ${outdir}/${out}.hic
 ## the output hic file could be viewed with JuiceBox https://github.com/aidenlab/Juicebox
 noplot=0
-#juicer_tools="java -Xmx32G -jar ~/bin/juicer_tools_1.22.01.jar pre --threads 12"
+#juicer_tools="java -Xmx32G -jar /bin/juicer_tools_1.22.01.jar pre --threads 12"
 ## v1.9.9 seems much faster than v1.22.01
-juicer_tools="java -Xmx32G -jar ~/bin/juicer_tools.1.9.9_jcuda.0.8.jar pre"
-pretext_map="~/bin/PretextMap"
-pretext_snapshot="~/bin/PretextSnapshot"
-samtools="~/bin/samtools"
+juicer_tools="java -Xmx32G -jar /bin/juicer_tools.1.9.9_jcuda.0.8.jar pre"
+pretext_map="/bin/PretextMap"
+pretext_snapshot="/bin/PretextSnapshot"
+samtools="/bin/samtools"
 
 #### run yahs scaffolding
 ../yahs -o ${outdir}/${out} ${contigs} ${hicaln} >${outdir}/${out}.log 2>&1

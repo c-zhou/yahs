@@ -36,6 +36,10 @@
 #include "sdict.h"
 #include "asset.h"
 
+#define JUICER_VERSION "1.1"
+
+static double jc_realtime0;
+
 KHASH_SET_INIT_STR(str)
 
 static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scale, int count_gap, FILE *fo)
@@ -206,6 +210,19 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
     return strdup(bam1_qname(b));
 }
 
+static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
+{
+    // 0x4 0x8 0x40 0x100 0x400 0x800
+    if (b->core.flag & 0xD4C)
+        return 0;
+    *cname0 = h->target_name[b->core.tid];
+    *s0 = b->core.pos + 1;
+    *cname1 = h->target_name[b->core.mtid];
+    *s1 = b->core.mpos + 1;
+
+    return bam1_qname(b);
+}
+
 static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
 {
     bamFile fp;
@@ -217,6 +234,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     uint64_t p0, p1;
     int8_t buff;
     long rec_c, pair_c;
+    enum bam_sort_order so;
 
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -226,74 +244,114 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
-    fp = bam_open(f, "r"); // sorted by read name
+    fp = bam_open(f, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
-
+    
     h = bam_header_read(fp);
     b = bam_init1();
+    so = bam_hrecs_sort_order(h);
     cname0 = cname1 = rname0 = rname1 = 0;
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = 0;
     p0 = p1 = 0;
     rec_c = pair_c = 0;
-    buff = 0;
-    while (bam_read1(fp, b) >= 0 ) {
-        if (buff == 0) {
-            rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
-            if (!rname0)
-                continue;
-            ++buff;
-        } else if (buff == 1) {
-            rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
-            if (!rname1)
-                continue;
-            if (strcmp(rname0, rname1) == 0) {
-                ++pair_c;
+    buff = 0;    
+    
+    if (so == ORDER_NAME) {
+        // sorted by read names
+        while (bam_read1(fp, b) >= 0 ) {
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
-                if (s0 > 0 && s1 >0) {
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
-                    sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
+            if (buff == 0) {
+                rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
+                if (!rname0)
+                    continue;
+                ++buff;
+            } else if (buff == 1) {
+                rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
+                if (!rname1)
+                    continue;
+                if (strcmp(rname0, rname1) == 0) {
+                    ++pair_c;
 
-                    if (i0 == UINT32_MAX) {
-                        k = kh_put(str, hmseq, cname0, &absent);
-                        if (absent) {
-                            kh_key(hmseq, k) = strdup(cname0);
-                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                    if (s0 > 0 && s1 >0) {
+                        sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
+                        sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
+
+                        if (i0 == UINT32_MAX) {
+                            k = kh_put(str, hmseq, cname0, &absent);
+                            if (absent) {
+                                kh_key(hmseq, k) = strdup(cname0);
+                                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                            }
+                        } else if (i1 == UINT32_MAX) {
+                            k = kh_put(str, hmseq, cname1, &absent);
+                            if (absent) {
+                                kh_key(hmseq, k) = strdup(cname1);
+                                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                            }
+                        } else {
+                            if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                                fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
+                            else
+                                fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
                         }
-                    } else if (i1 == UINT32_MAX) {
-                        k = kh_put(str, hmseq, cname1, &absent);
-                        if (absent) {
-                            kh_key(hmseq, k) = strdup(cname1);
-                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
-                        }
-                    } else {
-                        if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
-                            fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
-                        else
-                            fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
                     }
+                    free(rname0);
+                    free(rname1);
+                    rname0 = 0;
+                    rname1 = 0;
+                    buff = 0;
+                } else {
+                    cname0 = cname1;
+                    s0 = s1;
+                    e0 = e1;
+                    free(rname0);
+                    rname0 = rname1;
+                    rname1 = 0;
+                    buff = 1;
                 }
-                free(rname0);
-                free(rname1);
-                rname0 = 0;
-                rname1 = 0;
-                buff = 0;
-            } else {
-                cname0 = cname1;
-                s0 = s1;
-                e0 = e1;
-                free(rname0);
-                rname0 = rname1;
-                rname1 = 0;
-                buff = 1;
             }
         }
+    } else {
+        // sorted by coordinates or others
+        if (mq > 0)
+            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hu suppressed \n", __func__, mq);
 
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+        while (bam_read1(fp, b) >= 0 ) {
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c); 
+            
+            if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
+                continue;
+
+            ++pair_c;
+            sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
+            sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1, &i1, &p1, count_gap);
+
+            if (i0 == UINT32_MAX) {
+                k = kh_put(str, hmseq, cname0, &absent);
+                if (absent) {
+                    kh_key(hmseq, k) = strdup(cname0);
+                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                }
+            } else if (i1 == UINT32_MAX) {
+                k = kh_put(str, hmseq, cname1, &absent);
+                if (absent) {
+                    kh_key(hmseq, k) = strdup(cname1);
+                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                }
+            } else {
+                if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                    fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
+                else
+                    fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+            }
+        }
     }
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
@@ -434,25 +492,25 @@ static void print_help_pre(FILE *fp_help)
     fprintf(fp_help, "    -a                preprocess for assembly mode\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for '-a' mode) [stdout]\n");
+    fprintf(fp_help, "    --version         show version number\n");
 }
 
 static ko_longopt_t long_options[] = {
     { "help",           ko_no_argument, 'h' },
+    { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
 };
 
 static int main_pre(int argc, char *argv[])
 {
-    if (argc < 4) {
-        print_help_pre(stderr);
-        return 1;
-    }
-
     FILE *fo;
     char *fai, *agp, *agp1, *link_file, *out, *out1, *annot, *lift, *ext;
     int mq, asm_mode;;
+    
+    liftrlimit();
+    jc_realtime0 = realtime();
 
-    const char *opt_str = "q:ao:h";
+    const char *opt_str = "q:ao:Vh";
     ketopt_t opt = KETOPT_INIT;
     int c, ret;
     FILE *fp_help = stderr;
@@ -468,7 +526,10 @@ static int main_pre(int argc, char *argv[])
         } else if (c == 'a') {
             asm_mode = 1;
         } else if (c == 'h') {
-            fp_help = stdout;
+            fp_help = stdout;   
+        } else if (c == 'V') {
+            puts(JUICER_VERSION);
+            return 0;
         } else if (c == '?') {
             fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
@@ -594,6 +655,13 @@ static int main_pre(int argc, char *argv[])
     if (lift)
         free(lift);
 
+    fprintf(stderr, "[I::%s] Version: %s\n", __func__, JUICER_VERSION);
+    fprintf(stderr, "[I::%s] CMD: juicer", __func__);
+    int i;
+    for (i = 0; i < argc; ++i)
+        fprintf(stderr, " %s", argv[i]);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
+
     return ret;
 }
 
@@ -609,7 +677,6 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
     }
 
     dict = make_asm_dict_from_agp(sdict, lift);
-
     
     char *line = NULL;
     size_t ln = 0;
@@ -697,18 +764,18 @@ static void print_help_post(FILE *fp_help)
     fprintf(fp_help, "Usage: juicer post [options] <review.assembly> <liftover.agp> <contigs.fa[.fai]>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for scaffolds FASTA output) [stdout]\n");
+    fprintf(fp_help, "    --version         show version number\n");
 }
 
 static int main_post(int argc, char *argv[])
 {
-    if (argc < 4) {
-        print_help_post(stderr);
-        return 1;
-    }
-    
     FILE *fo;
     char *fa, *fa1, *out, *out1;
-    const char *opt_str = "o:h";
+
+    liftrlimit();
+    jc_realtime0 = realtime();
+
+    const char *opt_str = "o:Vh";
     ketopt_t opt = KETOPT_INIT;
     int c, ret, is_fai;
     FILE *fp_help = stderr;
@@ -720,6 +787,9 @@ static int main_post(int argc, char *argv[])
             out = opt.arg;
         } else if (c == 'h') {
             fp_help = stdout;
+        } else if (c == 'V') {
+            puts(JUICER_VERSION);
+            return 0;
         } else if (c == '?') {
             fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
@@ -777,6 +847,13 @@ static int main_post(int argc, char *argv[])
     if (fa1)
         free(fa1);
 
+    fprintf(stderr, "[I::%s] Version: %s\n", __func__, JUICER_VERSION);
+    fprintf(stderr, "[I::%s] CMD: juicer", __func__);
+    int i;
+    for (i = 0; i < argc; ++i)
+        fprintf(stderr, " %s", argv[i]);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
+
     return ret;
 }
 
@@ -784,7 +861,7 @@ static int usage()
 {
     fprintf(stderr, "\n");
     fprintf(stderr, "Usage:   juicer <command> <arguments>\n");
-    fprintf(stderr, "Version: %s\n\n", YAHS_VERSION);
+    fprintf(stderr, "Version: %s\n\n", JUICER_VERSION);
     fprintf(stderr, "Command: pre       generate files compatible with Juicebox toolset\n");
     fprintf(stderr, "         post      generate assembly files after Juicebox curation\n");
     fprintf(stderr, "\n");

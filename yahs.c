@@ -41,6 +41,8 @@
 #include "enzyme.h"
 #include "asset.h"
 
+#define YAHS_VERSION "1.1a-r3"
+
 #undef DEBUG
 #undef DEBUG_ERROR_BREAK
 #undef DEBUG_GRAPH_PRUNE
@@ -76,6 +78,8 @@ static double ec_fold_thresh = .2;
 double qbinom(double, double, double, int, int);
 
 int VERBOSE = 0;
+
+static double ys_realtime0;
 
 graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, double min_norm, double la)
 {
@@ -554,6 +558,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    liftrlimit();
+    ys_realtime0 = realtime();
+
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
     int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec;
 
@@ -784,6 +791,13 @@ int main(int argc, char *argv[])
 
     if (re_cuts)
         re_cuts_destroy(re_cuts);
+
+    fprintf(stderr, "[I::%s] Version: %s\n", __func__, YAHS_VERSION);
+    fprintf(stderr, "[I::%s] CMD:", __func__);
+    int i;
+    for (i = 0; i < argc; ++i)
+        fprintf(stderr, " %s", argv[i]);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - ys_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
 
     return ret;
 }

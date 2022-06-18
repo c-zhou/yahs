@@ -32,6 +32,11 @@
 
 #include "ketopt.h"
 #include "sdict.h"
+#include "asset.h"
+
+#define AF_VERSION "1.0"
+
+static double af_realtime0;
 
 static void print_help(FILE *fp_help)
 {
@@ -39,10 +44,12 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -l INT            line width [60]\n");
     fprintf(fp_help, "    -o STR            output to file [stdout]\n");
+    fprintf(fp_help, "    --version         show version number\n");
 }
 
 static ko_longopt_t long_options[] = {
     { "help",           ko_no_argument, 'h' },
+    { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
 };
 
@@ -53,11 +60,14 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    liftrlimit();
+    af_realtime0 = realtime();
+
     FILE *fo;
     char *fa, *agp, *out;
     int line_wd;
 
-    const char *opt_str = "o:l:h";
+    const char *opt_str = "o:l:Vh";
     ketopt_t opt = KETOPT_INIT;
     int c;
     FILE *fp_help = stderr;
@@ -71,7 +81,10 @@ int main(int argc, char *argv[])
             out = opt.arg;
         } else if (c == 'h') {
             fp_help = stdout;
-        }else if (c == '?') {
+        } else if (c == 'V') {
+            puts(AF_VERSION);
+            return 0;
+        } else if (c == '?') {
             fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
         } else if (c == ':') {
@@ -104,6 +117,13 @@ int main(int argc, char *argv[])
 
     if (out != 0)
         fclose(fo);
-    
+
+    fprintf(stderr, "[I::%s] Version: %s\n", __func__, AF_VERSION);
+    fprintf(stderr, "[I::%s] CMD:", __func__);
+    int i;
+    for (i = 0; i < argc; ++i)
+        fprintf(stderr, " %s", argv[i]);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - af_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
+ 
     return 0;
 }

@@ -46,6 +46,20 @@ double cputime(void)
     return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
 }
 
+#ifdef __linux__
+#include <sys/resource.h>
+#include <sys/time.h>
+void liftrlimit()
+{
+    struct rlimit r;
+    getrlimit(RLIMIT_AS, &r);
+    r.rlim_cur = r.rlim_max;
+    setrlimit(RLIMIT_AS, &r);
+}
+#else
+void liftrlimit() {}
+#endif
+
 long peakrss(void)
 {
     struct rusage r;

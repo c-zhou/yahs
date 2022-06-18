@@ -164,6 +164,53 @@ int bam_read1(bamFile fp, bam1_t *b)
 	return 4 + block_len;
 }
 
+enum bam_sort_order bam_hrecs_sort_order(bam_header_t *header)
+{
+	char *hdr;
+	size_t i, j, len;
+
+	len = header->l_text;
+	hdr = header->text;
+	
+	if (len < 3)
+		if (len == 0 || *hdr == '\0')
+			return ORDER_UNKNOWN;
+
+	for (i = 0; i < len; i++) {
+		if (!strncmp(hdr + i, "@HD", 3)) {
+			i += 3;
+			if (hdr[i] != '\t')
+				return ORDER_UNKNOWN;
+			i++;
+			while (hdr[i]!='\n') {
+				for (j = i; j < len && hdr[j] != '\0' && hdr[j] != '\n' && hdr[j] != '\t'; j++)
+					;
+
+				if (j - i < 3 || hdr[i + 2] != ':') {
+					return ORDER_UNKNOWN;
+				}
+
+				if (!strncmp(hdr + i, "SO", 2)) {
+					i += 3;
+					if (!strncmp(hdr + i, "unsorted", 8))
+						return ORDER_UNSORTED;
+					else if (!strncmp(hdr + i, "queryname", 9))
+						return ORDER_NAME;
+					else if (!strncmp(hdr + i, "coordinate", 10))
+						return ORDER_COORD;
+					else
+						return ORDER_UNKNOWN;
+				}
+
+				i = j + 1;
+			}
+		}
+		while(hdr[i]!='\n')
+			i++;
+	}
+	
+	return ORDER_UNKNOWN;
+}
 
 #ifdef USE_VERBOSE_ZLIB_WRAPPERS
 // Versions of gzopen, gzread and gzclose that print up error messages

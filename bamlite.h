@@ -72,6 +72,15 @@ typedef struct {
 	uint8_t *data;
 } bam1_t;
 
+/*! Sort order parsed from @HD line */
+enum bam_sort_order {
+    ORDER_UNKNOWN  =-1,
+    ORDER_UNSORTED = 0,
+    ORDER_NAME     = 1,
+    ORDER_COORD    = 2
+  //ORDER_COLLATE  = 3 // maybe one day!
+};
+
 #ifndef kroundup32
 #define kroundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
 #endif
@@ -100,6 +109,8 @@ extern "C" {
 	void bam_header_destroy(bam_header_t *header);
 	bam_header_t *bam_header_read(bamFile fp);
 	int bam_read1(bamFile fp, bam1_t *b);
+    /*! Returns the sort order from the @HD SO: field */
+    enum bam_sort_order bam_hrecs_sort_order(bam_header_t *header);
 
 #ifdef USE_VERBOSE_ZLIB_WRAPPERS
 	gzFile bamlite_gzopen(const char *fn, const char *mode);
