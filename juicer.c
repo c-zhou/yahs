@@ -804,6 +804,12 @@ static int main_post(int argc, char *argv[])
         return 0;
     }
 
+    if (argc - opt.ind < 3) {
+        fprintf(stderr, "[E::%s] missing input: three positional options required\n", __func__);
+        print_help_post(stderr);
+        return 1;
+    }
+
     if (out) {
         out1 = (char *) malloc(strlen(out) + 35);
         sprintf(out1, "%s.FINAL.agp", out);
