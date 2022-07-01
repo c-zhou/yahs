@@ -582,7 +582,7 @@ char nucl_toupper[] = {
     'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N', 123, 124, 125, 126, 127
 };
 
-void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd)
+void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd, int un_oris)
 {
     FILE *agp_in;
     char *line = NULL;
@@ -590,10 +590,10 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     sd_seq_t s;
     size_t ln = 0;
     ssize_t read;
-    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[4];
+    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[16];
     char *name = NULL;
-    uint32_t i, c, cstart, cend;
-    uint64_t l;
+    uint32_t c;
+    uint64_t i, l, cstart, cend;
 
     agp_in = fopen(agp, "r");
     if (agp_in == NULL) {
@@ -605,7 +605,10 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     l = 0;
     while ((read = getline(&line, &ln, agp_in)) != -1) {
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
-        if (!strncmp(type, "N", 1)) {
+        if (!strncmp(sname, "#", 1))
+            // header lines
+            continue;
+        if (!strncmp(type, "N", 1) || !strncmp(type, "U", 1)) {
             cend = strtoul(cname, NULL, 10);
             for (i = 0; i < cend; ++i) {
                 fputc('N', fo);
@@ -636,20 +639,27 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
             exit(EXIT_FAILURE);
         }
         s = dict->s[c];
-        if (strncmp(oris, "-", 1)) {
+        if (!strncmp(oris, "+", 1) || (un_oris && (!strncmp(oris, "?", 1) || !strncmp(oris, "0", 1) || !strncmp(oris, "na", 2)))) {
             // forward
             for (i = cstart - 1; i < cend; ++i) {
                 fputc(s.seq[i], fo);
                 if (++l % line_wd == 0)
                     fputc('\n', fo);
             }
-        } else {
+        } else if (!strncmp(oris, "-", 1)) {
             // reverse
             for (i = cend; i >= cstart; --i) {
                 fputc(comp_table[(int) s.seq[i - 1]], fo);
                 if (++l % line_wd == 0)
                     fputc('\n', fo);
-            }       
+            }
+        } else {
+            fprintf(stderr, "[E::%s] unknown orientation of sequence component %s:%lu-%lu on %s: '%s'\n", __func__, cname, cstart, cend, sname, oris);
+            if (un_oris) {
+                fprintf(stderr, "[E::%s] valid identifiers for unorientated sequence include: '?', '0' and 'na'\n", __func__);
+                fprintf(stderr, "[E::%s] see https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/#FORMAT\n", __func__);
+            }
+            exit(EXIT_FAILURE);
         }
     }
     if (l % line_wd != 0)

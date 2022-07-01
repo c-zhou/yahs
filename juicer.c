@@ -841,7 +841,7 @@ static int main_post(int argc, char *argv[])
             fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, fa1);
             exit(EXIT_FAILURE);
         }
-        write_fasta_file_from_agp(fa, out1, fo1, 60);
+        write_fasta_file_from_agp(fa, out1, fo1, 60, 0);
         fclose(fo1);
     }
 
