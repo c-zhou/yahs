@@ -33,7 +33,6 @@
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
-#include <sys/sysctl.h>
 
 #include "asset.h"
 
@@ -47,8 +46,6 @@ double cputime(void)
 }
 
 #ifdef __linux__
-#include <sys/resource.h>
-#include <sys/time.h>
 void liftrlimit()
 {
     struct rlimit r;
@@ -77,6 +74,10 @@ double realtime(void)
     gettimeofday(&tp, NULL);
     return tp.tv_sec + tp.tv_usec * 1e-6;
 }
+
+#if defined CTL_HW && defined HW_USERMEM
+#include <sys/sysctl.h>
+#endif
 
 long physmem_total(void)
 {

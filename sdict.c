@@ -166,7 +166,8 @@ void sd_hash(sdict_t *d)
 
 sdict_t *make_sdict_from_fa(const char *f, uint32_t min_len)
 {
-    int fd, l;
+    int fd;
+    int64_t l;
     gzFile fp;
     kseq_t *ks;
     void *ko = 0;
@@ -181,11 +182,14 @@ sdict_t *make_sdict_from_fa(const char *f, uint32_t min_len)
     
     sdict_t *d;
     d = sd_init();
-    // WARNING: might introduce bug here
-    // l is int type by definition in kseq.h
-    while ((l = kseq_read(ks)) >= 0)
+    while ((l = kseq_read(ks)) >= 0) {
+        if (l > UINT32_MAX) {
+            fprintf(stderr, "[E::%s] >4G sequence chunks are not supported: %s [%ld]\n", __func__, ks->name.s, l);
+            exit(EXIT_FAILURE);
+        }
         if (strlen(ks->seq.s) >= min_len)
             sd_put1(d, ks->name.s, ks->seq.s, strlen(ks->seq.s));
+    }
 
     kseq_destroy(ks);
     gzclose(fp);
@@ -201,7 +205,7 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
     size_t ln = 0;
     ssize_t read;
     char name[4096];
-    uint32_t len;
+    int64_t len;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -212,7 +216,11 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
     sdict_t *d;
     d = sd_init();
     while ((read = getline(&line, &ln, fp)) != -1) {
-        sscanf(line, "%s %u", name, &len);
+        sscanf(line, "%s %ld", name, &len);
+        if (len > UINT32_MAX) {
+            fprintf(stderr, "[E::%s] >4G sequence chunks are not supported: %s [%ld]\n", __func__, name, len);
+            exit(EXIT_FAILURE);
+        }
         if (len >= min_len)
             sd_put(d, name, len);
     }
@@ -227,7 +235,7 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
     size_t ln = 0;
     ssize_t read;
     char name[4096], lens[4096];
-    uint32_t len;
+    uint64_t len;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -241,6 +249,10 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
         if (line[0] == 'S') {
             sscanf(line, "%*s %s %*s %s", name, lens);
             len = strtoul(lens + 5, NULL, 10);
+            if (len > UINT32_MAX) {
+                fprintf(stderr, "[E::%s] >4G sequence chunks are not supported: %s [%ld]\n", __func__, name, len);
+                exit(EXIT_FAILURE);
+            }
             if (len >= min_len)
                 sd_put(d, name, len);
         }
@@ -593,7 +605,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[16];
     char *name = NULL;
     uint32_t c;
-    uint64_t i, l, cstart, cend;
+    int64_t i, l, cstart, cend, ns, L;
 
     agp_in = fopen(agp, "r");
     if (agp_in == NULL) {
@@ -602,12 +614,12 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     }
 
     dict = make_sdict_from_fa(fa, 0);
-    l = 0;
+    l = L = ns = 0;
     while ((read = getline(&line, &ln, agp_in)) != -1) {
-        sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
-        if (!strncmp(sname, "#", 1))
+        if (!strncmp(line, "#", 1))
             // header lines
             continue;
+        sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
         if (!strncmp(type, "N", 1) || !strncmp(type, "U", 1)) {
             cend = strtoul(cname, NULL, 10);
             for (i = 0; i < cend; ++i) {
@@ -623,6 +635,8 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
             l = 0;
         }
         if (strcmp(sname, name)) {
+            ++ns;
+            L += l;
             free(name);
             name = strdup(sname);
             if (l % line_wd != 0)
@@ -639,6 +653,12 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
             exit(EXIT_FAILURE);
         }
         s = dict->s[c];
+        if (cstart < 1 || cstart > cend || cend > s.len) {
+            fprintf(stderr, "[E::%s] invalid sequence component %s:%ld-%ld on %s\n", __func__, cname, cstart, cend, sname);
+            if (cend > s.len)
+                fprintf(stderr, "[E::%s] sequence end position (%ld) greater than sequence length (%u)\n", __func__, cend, s.len);
+            exit(EXIT_FAILURE);
+        }
         if (!strncmp(oris, "+", 1) || (un_oris && (!strncmp(oris, "?", 1) || !strncmp(oris, "0", 1) || !strncmp(oris, "na", 2)))) {
             // forward
             for (i = cstart - 1; i < cend; ++i) {
@@ -654,7 +674,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
                     fputc('\n', fo);
             }
         } else {
-            fprintf(stderr, "[E::%s] unknown orientation of sequence component %s:%lu-%lu on %s: '%s'\n", __func__, cname, cstart, cend, sname, oris);
+            fprintf(stderr, "[E::%s] unknown orientation of sequence component %s:%ld-%ld on %s: '%s'\n", __func__, cname, cstart, cend, sname, oris);
             if (un_oris) {
                 fprintf(stderr, "[E::%s] valid identifiers for unorientated sequence include: '?', '0' and 'na'\n", __func__);
                 fprintf(stderr, "[E::%s] see https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/#FORMAT\n", __func__);
@@ -664,6 +684,11 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     }
     if (l % line_wd != 0)
         fputc('\n', fo);
+    ++ns;
+    L += l;
+    fprintf(stderr, "[I::%s] Number sequences: %ld\n", __func__, ns);
+    fprintf(stderr, "[I::%s] Number bases: %ld\n", __func__, L);
+
     free(name);
     free(dict);
 

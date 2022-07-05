@@ -92,7 +92,7 @@ You can find more information about mannual editing with Juicebox here [Issue 4]
 
 ## Other tools
 * ***juicer*** is a tool used to quickly generate HiC alignment file required for HiC contact map generation with tools like [Juicebox](https://github.com/aidenlab/Juicebox), [PretextMap](https://github.com/wtsi-hpag/PretextMap) and [Higlass](https://github.com/higlass/higlass) (`juicer pre`). It can be also used to generate AGP and FASTA files after manual editing with Juicebox JBAT (`juicer post`).
-* ***agp_to_fasta*** creates a FASTA file from a AGP file. It takes two positional parameters: the AGP file and the contig FASTA file. By default, the output will be directed to `stdout`. You can write to a file with `-o` option. It also allows changing the FASTA line width with `-l` option, which by default is 60. 
+* ***agp_to_fasta*** creates a FASTA file from a AGP file. It takes two positional parameters: the AGP file and the contig FASTA file. By default, the output will be directed to `stdout`. You can write to a file with `-o` option. It allows changing the FASTA line width with `-l` option, which by default is 60. If the AGP file contains sequence components of unknown orientations ('?', '0' or 'na' identifiers, see [AGP format](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/)), you will need `-u` option, with which components with unknown orientation are treated as if they had '+' orientation.
 
 ## Limitations
 * In rare cases, YaHS has been seen making telomere-to-telomere false joins.
