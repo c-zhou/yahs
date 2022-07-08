@@ -78,15 +78,14 @@ void link_mat_destroy(link_mat_t *link_mat)
     free(link_mat);
 }
 
-uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double min_frac, uint32_t resolution)
+uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double min_frac, uint32_t resolution, uint8_t mq)
 {
-    uint32_t i;
     FILE *fp;
+    uint32_t i, m, i0, i1, nb, *link_c;
+    uint8_t buffer[BUFF_SIZE * 17];
+    uint64_t max_len, p0, p1;
+    int64_t magic_number;
     long pair_c, intra_c, cum_c;
-    uint64_t max_len;
-    uint32_t nb, *link_c;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1;
-    uint64_t p0, p1;
 
     max_len = 0;
     for (i = 0; i < dict->n; ++i)
@@ -101,21 +100,33 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
         exit(EXIT_FAILURE);
     }
 
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        exit(EXIT_FAILURE);
+    }
+
     pair_c = 0;
     intra_c = 0;
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+
+        for (i = 0; i < m; i += 17) {
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
+
             if (i0 == i1) {
                 ++link_c[labs((long) p0 - p1) / resolution];
                 ++intra_c;
             }
+            
+            ++pair_c;
         }
-        pair_c += m / 4;
 
-        if (m < BUFF_SIZE) {
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 0;
             break;
@@ -130,7 +141,7 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
         cum_c += link_c[i++];
     free(link_c);
 
-#ifdef REMOVE_NOISE
+#ifdef DEBUG
       printf("[I::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
 #endif
     return i * resolution;
@@ -176,17 +187,24 @@ static void calc_moving_average(int64_t *arr, int32_t n, int32_t a)
     free(buff);
 }
 
-link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_thres, uint32_t resolution, double noise, uint32_t move_avg)
+link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_thres, uint32_t resolution, double noise, uint32_t move_avg, uint8_t mq)
 {
     FILE *fp;
-    uint32_t i, j, n;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint32_t i, j, m, n, i0, i1;
     uint64_t p0, p1;
+    int64_t magic_number;
+    uint8_t buffer[BUFF_SIZE * 17];
     long pair_c, intra_c;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
+        exit(EXIT_FAILURE);
+    }
+
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
 
@@ -203,22 +221,27 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
 
     pair_c = intra_c = 0;
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+
+        for (i = 0; i < m; i += 17) {
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
             if (p0 > p1)
                 SWAP(uint64_t, p0, p1);
             if (i0 == i1 && p1 - p0 <= dist_thres) {
-                ++intra_c;
                 link_mat->link[i0].link[(MAX(p0, 1) - 1) / resolution] += 1;
                 link_mat->link[i1].link[(MAX(p1, 1) - 1) / resolution] -= 1;
+                ++intra_c;
             }
+            
+            ++pair_c;
         }
-        pair_c += m / 4;
-
-        if (m < BUFF_SIZE) {
+        
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 0;
             break;

@@ -44,6 +44,7 @@
 #undef DEBUG
 #undef DEBUG_NOISE
 #undef DEBUG_ORIEN
+#undef DEBUG_INTRA
 
 #define USE_MEDIAN_NORM
 #define MIN_RE_DENS .1
@@ -341,7 +342,7 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
         //for (j = 0; j < p; ++j)
         //    if (link->link[j] < .5)
         //        link->link[j] = -FLT_MAX;
-#ifdef DEBUG
+#ifdef DEBUG_INTRA
         printf("[I::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
 #endif
     }
@@ -495,11 +496,12 @@ static inline void normalise_by_size(double *l)
     *l = i;
 }
 
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq)
+intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq, uint8_t mq)
 {
-    uint32_t i, j, n, b0, b1;
-    uint32_t buffer[BUFF_SIZE], k, m, i0, i1;
+    uint32_t i, j, k, m, n, i0, i1, b0, b1;
     uint64_t p0, p1;
+    int64_t magic_number;
+    uint8_t buffer[BUFF_SIZE * 17];
     long pair_c, intra_c;
     intra_link_mat_t *link_mat;
     intra_link_t *link;
@@ -509,28 +511,37 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     if (fp == NULL)
         return 0;
 
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        return 0;
+    }
+
     link_mat = use_gap_seq? intra_link_mat_init(dict, re_cuts, resolution) : intra_link_mat_init_sdict(dict->sdict, re_cuts, resolution);
 
     pair_c = 0;
     intra_c = 0;
 
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+
+        for (i = 0; i < m; i += 17) {
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+
             if (use_gap_seq) {
-                sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
-                sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
+                sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
+                sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
                 b0 = (MAX(p0, 1) - 1) / resolution;
                 b1 = (MAX(p1, 1) - 1) / resolution;
             } else {
-                i0 = buffer[i];
-                i1 = buffer[i + 2];
-                b0 = (MAX(buffer[i + 1], 1) - 1) / resolution;
-                b1 = (MAX(buffer[i + 3], 1) - 1) / resolution;
+                i0 = *(uint32_t *) (buffer + i);
+                i1 = *(uint32_t *) (buffer + i + 8);
+                b0 = (MAX(*(uint32_t *) (buffer + i + 4),  1) - 1) / resolution;
+                b1 = (MAX(*(uint32_t *) (buffer + i + 12), 1) - 1) / resolution;
             }
 
             if (i0 == i1) {
-                ++intra_c;
                 link = &link_mat->links[i0];
                 if (link->n) {
                     if (b0 > b1)
@@ -538,11 +549,14 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     k = (long) (link->n * 2 - b1 + b0 - 3) * (b1 - b0) / 2 + b1;
                     link->link[k] += signf(link->link[k]);
                 }
-            }
-        }
-        pair_c += m / 4;
 
-        if (m < BUFF_SIZE) {
+                ++intra_c;
+            }
+
+            ++pair_c;
+        }
+
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 0;
             break;
@@ -567,11 +581,12 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     return link_mat;
 }
 
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius)
+inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius, uint8_t mq)
 {
-    uint32_t i, j, n, k, b0, b1;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint32_t i, j, k, m, n, i0, i1, b0, b1;
     uint64_t p0, p1;
+    int64_t magic_number;
+    uint8_t buffer[BUFF_SIZE * 17];
     double l0, l1, a, na[4], nc[4];
     long pair_c, inter_c, radius_c, noise_c;
     inter_link_mat_t *link_mat;
@@ -582,19 +597,29 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     if (fp == NULL)
         return 0;
 
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        return 0;
+    }
+
     n = dict->n;
     link_mat = inter_link_mat_init(dict, re_cuts, resolution, radius);
     pair_c = inter_c = radius_c = 0;
 
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+
+        for (i = 0; i < m; i += 17) {
+            ++pair_c;
+
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+            
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
             if (i0 != i1) {
-                ++inter_c;
-                
                 if (i0 > i1) {
                     SWAP(uint32_t, i0, i1);
                     SWAP(uint64_t, p0, p1);
@@ -645,11 +670,12 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                         ++radius_c;
                     }
                 }
+
+                ++inter_c;
             }
         }
-        pair_c += m / 4;
 
-        if (m < BUFF_SIZE) {
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 0;
             break;
@@ -1091,11 +1117,12 @@ loop_i_end:
     free(norms);
 }
 
-int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
+int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
 {
-    uint32_t i, j, n, na, k, b0, b1, b, ma, sma, n_ma;
-    uint32_t buffer[BUFF_SIZE], m, i0, i1;
+    uint32_t i, j, k, m, n, na, i0, i1, b0, b1, b, ma, sma, n_ma;
     uint64_t p0, p1;
+    int64_t magic_number;
+    uint8_t buffer[BUFF_SIZE * 17];
     uint32_t *link, l;
     int8_t *directs;
     long pair_c, inter_c;
@@ -1104,6 +1131,12 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
     fp = fopen(f, "r");
     if (fp == NULL)
         return 0;
+    
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        return 0;
+    }
 
     n = dict->n;
     na = (long) n * (n - 1) / 2;
@@ -1111,14 +1144,16 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
     pair_c = inter_c = 0;
 
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, 0);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, 0);
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+        
+        for (i = 0; i < m; i += 17) {
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
             if (i0 != i1) {
-                ++inter_c;
-
                 if (i0 > i1) {
                     SWAP(uint32_t, i0, i1);
                     SWAP(uint64_t, p0, p1);
@@ -1127,10 +1162,13 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict)
                 b1 = !((double) p1 / dict->s[i1].len > .5);
                 b = (b0 << 1) | (!b1);
                 ++link[b * na + (long) (n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1];
+                
+                ++inter_c;
             }
+
+            ++pair_c;
         }
-        pair_c += m / 4;
-        if (m < BUFF_SIZE) {
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 0;
             break;
@@ -1254,18 +1292,20 @@ static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
     return s;
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, int32_t *e, uint8_t *q, char **cname)
 {
-    // 0x4 0x100 0x400 0x800
-    if (b->core.flag & 0xD04)
+    // 0x4 0x100 0x200 0x400 0x800
+    if (b->core.flag & 0xF04)
         return 0;
     *cname = h->target_name[b->core.tid];
-    if (b->core.qual < q) {
+    if (b->core.qual < mq) {
         *s = -1;
         *e = -1;
+        *q = 0;
     } else {
-        *s = b->core.pos + 1;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
+        *s = b->core.pos;
+        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos);
+        *q = b->core.qual;
     }
     
     return strdup(bam1_qname(b));
@@ -1273,13 +1313,13 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
 
 static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
 {
-    // 0x4 0x8 0x40 0x100 0x400 0x800
-    if (b->core.flag & 0xD4C)
+    // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
+    if (b->core.flag & 0xF4C)
         return 0;
     *cname0 = h->target_name[b->core.tid];
-    *s0 = b->core.pos + 1;
+    *s0 = b->core.pos;
     *cname1 = h->target_name[b->core.mtid];
-    *s1 = b->core.mpos + 1;
+    *s1 = b->core.mpos;
 
     return bam1_qname(b);
 }
@@ -1293,6 +1333,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     char *cname0, *cname1, *rname0, *rname1;
     int32_t s0, s1, e0, e1;
     uint32_t i0, i1, p0, p1;
+    uint8_t q, q0, q1;
     int8_t buff;
     long rec_c, pair_c, inter_c, intra_c;
     enum bam_sort_order so;
@@ -1315,6 +1356,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
+    write_bin_header(fo);
 
     h = bam_header_read(fp);
     b = bam_init1();
@@ -1322,28 +1364,30 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     cname0 = cname1 = rname0 = rname1 = 0;
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = p0 = p1 = 0;
+    q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
 
     if (so == ORDER_NAME) {
         // sorted by read names
         while (bam_read1(fp, b) >= 0 ) {
+            
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if (buff == 0) {
-                rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
+                rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &q0, &cname0);
                 if (!rname0)
                     continue;
                 ++buff;
             } else if (buff == 1) {
-                rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &cname1);
+                rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &q1, &cname1);
                 if (!rname1)
                     continue;
                 if (strcmp(rname0, rname1) == 0) {
-                    ++pair_c;
+                    buff = 0;
 
-                    if (s0 > 0 && s1 > 0) {
+                    if (s0 >= 0 && s1 >= 0) {
                         i0 = sd_get(dict, cname0);
                         i1 = sd_get(dict, cname1);
 
@@ -1360,52 +1404,60 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                                 fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                             }
                         } else {
-                            if (i0 == i1)
-                                ++intra_c;
-                            else
-                                ++inter_c;
                             p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
                             p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
                             if (i0 > i1) {
                                 SWAP(uint32_t, i0, i1);
                                 SWAP(uint32_t, p0, p1);
                             }
+                            q = MIN(q0, q1);
                             fwrite(&i0, sizeof(uint32_t), 1, fo);
                             fwrite(&p0, sizeof(uint32_t), 1, fo);
                             fwrite(&i1, sizeof(uint32_t), 1, fo);
                             fwrite(&p1, sizeof(uint32_t), 1, fo);
+                            fwrite(&q, sizeof(uint8_t), 1, fo);
+
+                            if (i0 == i1)
+                                ++intra_c;
+                            else
+                                ++inter_c;
+                            
+                            ++pair_c;
                         }
                     }
+                    
                     free(rname0);
                     free(rname1);
                     rname0 = 0;
                     rname1 = 0;
-                    buff = 0;
                 } else {
+                    buff = 1;
+
                     cname0 = cname1;
                     s0 = s1;
                     e0 = e1;
+                    q0 = q1;
                     free(rname0);
                     rname0 = rname1;
                     rname1 = 0;
-                    buff = 1;
                 }
             }
         }
     } else {
         // sorted by coordinates or others
         if (mq > 0)
-            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hu suppressed \n", __func__, mq);
-        
-        while (bam_read1(fp, b) >= 0 ) {
+            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hhu suppressed \n", __func__, mq);
+        q = 255;
+
+        while (bam_read1(fp, b) >= 0) {
+            
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
                 continue;
 
-            ++pair_c;
-            if (s0 > 0 && s1 > 0) {
+            if (s0 >= 0 && s1 >= 0) {
                 i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
 
@@ -1422,10 +1474,6 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else {
-                    if (i0 == i1)
-                        ++intra_c;
-                    else
-                        ++inter_c;
                     if (i0 > i1) {
                         SWAP(uint32_t, i0, i1);
                         SWAP(uint32_t, s0, s1);
@@ -1434,6 +1482,14 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                     fwrite(&s0, sizeof(uint32_t), 1, fo);
                     fwrite(&i1, sizeof(uint32_t), 1, fo);
                     fwrite(&s1, sizeof(uint32_t), 1, fo);
+                    fwrite(&q, sizeof(uint8_t), 1, fo);
+
+                    if (i0 == i1)
+                        ++intra_c;
+                    else
+                        ++inter_c;
+
+                    ++pair_c;
                 }
             }
         }
@@ -1454,7 +1510,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     bam_close(fp);
     fclose(fo);
 
-    fprintf(stderr, "[I::%s] dumped %ld read pairs: %ld intra links + %ld inter links \n", __func__, pair_c, intra_c, inter_c);
+    fprintf(stderr, "[I::%s] dumped %ld read pairs from %ld records: %ld intra links + %ld inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 }
 
 void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out)
@@ -1465,6 +1521,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     ssize_t read;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint8_t q, q0, q1;
     int8_t buff;
     long rec_c, pair_c, inter_c, intra_c;
 
@@ -1485,19 +1542,26 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
         exit(EXIT_FAILURE);
     }
-    
+    write_bin_header(fo);
+
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = p0 = p1 = 0;
+    q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
+        
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+
+    
         if (buff == 0) {
-            sscanf(line, "%s %u %u %s", cname0, &s0, &e0, rname0);
+            sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
+            sscanf(line, "%s %u %u %s %hhu %*s", cname1, &s1, &e1, rname1, &q1);
             if (is_read_pair(rname0, rname1)) {
-                ++pair_c;
+                buff = 0;
 
                 i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
@@ -1515,33 +1579,36 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else {
-                    if (i0 == i1)
-                        ++intra_c;
-                    else
-                        ++inter_c;
                     p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
                     p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
                     if (i0 > i1) {
                         SWAP(uint32_t, i0, i1);
                         SWAP(uint32_t, p0, p1);
                     }
+                    q = MIN(q0, q1);
                     fwrite(&i0, sizeof(uint32_t), 1, fo);
                     fwrite(&p0, sizeof(uint32_t), 1, fo);
                     fwrite(&i1, sizeof(uint32_t), 1, fo);
                     fwrite(&p1, sizeof(uint32_t), 1, fo);
+                    fwrite(&q, sizeof(uint8_t), 1, fo);
+                
+                    if (i0 == i1)
+                        ++intra_c;
+                    else
+                        ++inter_c;
+
+                    ++pair_c;
                 }
-                buff = 0;
             } else {
+                buff = 1;
+
                 strcpy(cname0, cname1);
                 s0 = s1;
                 e0 = e1;
+                q0 = q1;
                 strcpy(rname0, rname1);
-                buff = 1;
             }
         }
-
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     for (k = 0; k < kh_end(hmseq); ++k)
@@ -1555,6 +1622,6 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     fclose(fp);
     fclose(fo);
 
-    fprintf(stderr, "[I::%s] dumped %ld read pairs: %ld intra links + %ld inter links \n", __func__, pair_c, intra_c, inter_c);
+    fprintf(stderr, "[I::%s] dumped %ld read pairs from %ld records: %ld intra links + %ld inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 }
 

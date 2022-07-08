@@ -60,8 +60,8 @@ extern "C" {
 
 link_t *link_init(uint32_t s, uint32_t n);
 link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b);
-link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_thres, uint32_t resolution, double noise, uint32_t move_avg);
-uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double min_frac, uint32_t resolution);
+link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_thres, uint32_t resolution, double noise, uint32_t move_avg, uint8_t mq);
+uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double min_frac, uint32_t resolution, uint8_t mq);
 void link_mat_destroy(link_mat_t *link_mat);
 void print_link_mat(link_mat_t *link_mat, asm_dict_t *dict, FILE *fp);
 bp_t *detect_break_points(link_mat_t *link_mat, uint32_t bin_size, uint32_t merge_size, double fold_thres, uint32_t dual_break_thres, uint32_t *bp_n);

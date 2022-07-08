@@ -194,3 +194,19 @@ uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g)
     return g;
 }
 
+void write_bin_header(FILE *fo)
+{
+    int64_t magic_number = BIN_H;
+    int64_t bin_version = BIN_V;
+    magic_number |= bin_version;
+    fwrite(&magic_number, sizeof(int64_t), 1, fo);
+}
+
+int is_valid_bin_header(int64_t n)
+{
+    int64_t magic_number = BIN_H;
+    int64_t bin_version = BIN_V;
+    magic_number |= bin_version;
+    return n == magic_number;
+}
+

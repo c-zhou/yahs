@@ -594,6 +594,17 @@ char nucl_toupper[] = {
     'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N', 123, 124, 125, 126, 127
 };
 
+static int is_empty_line(char *line)
+{
+    char *c;
+    c = line;
+    while (isspace((unsigned char) *c))
+        c++;
+    if(*c == 0)
+        return 1;
+    return 0;
+}
+
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd, int un_oris)
 {
     FILE *agp_in;
@@ -602,7 +613,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     sd_seq_t s;
     size_t ln = 0;
     ssize_t read;
-    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[16];
+    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[256];
     char *name = NULL;
     uint32_t c;
     int64_t i, l, cstart, cend, ns, L;
@@ -616,9 +627,10 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     dict = make_sdict_from_fa(fa, 0);
     l = L = ns = 0;
     while ((read = getline(&line, &ln, agp_in)) != -1) {
-        if (!strncmp(line, "#", 1))
-            // header lines
+        if (is_empty_line(line) || !strncmp(line, "#", 1))
+            // header or empty lines
             continue;
+        sname[0] = type[0] = cname[0] = cstarts[0] = cends[0] = oris[0] = '\0';
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
         if (!strncmp(type, "N", 1) || !strncmp(type, "U", 1)) {
             cend = strtoul(cname, NULL, 10);
@@ -649,7 +661,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
         cend = strtoul(cends, NULL, 10);
         c = sd_get(dict, cname);
         if (c == UINT32_MAX) {
-            fprintf(stderr, "[E::%s] sequence %s not found\n", __func__, cname);
+            fprintf(stderr, "[E::%s] sequence component '%s' not found\n", __func__, cname);
             exit(EXIT_FAILURE);
         }
         s = dict->s[c];
@@ -707,7 +719,7 @@ void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE
         fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
         len += seg.y;
         if (i != n - 1) {
-            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
+            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\t%s\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
             len += GAP_SZ;
         }
     }
@@ -770,7 +782,7 @@ void write_asm_dict_to_agp(asm_dict_t *dict, char *out)
             fprintf(agp_out, "%s\t%lu\t%lu\t%u\tW\t%s\t%u\t%u\t%c\n", dict->s[i].name, len + 1, len + seg.y, ++t, dict->sdict->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
             len += seg.y;
             if (j != n - 1) {
-                fprintf(agp_out, "%s\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\tna\n", dict->s[i].name, len + 1, len + GAP_SZ, ++t, GAP_SZ);
+                fprintf(agp_out, "%s\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\t%s\n", dict->s[i].name, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
                 len += GAP_SZ;
             }
         }

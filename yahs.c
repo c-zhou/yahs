@@ -41,7 +41,7 @@
 #include "enzyme.h"
 #include "asset.h"
 
-#define YAHS_VERSION "1.1"
+#define YAHS_VERSION "1.2a"
 
 #undef DEBUG
 #undef DEBUG_ERROR_BREAK
@@ -129,7 +129,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit)
+int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai, ml);
@@ -157,7 +157,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, re_cuts_
     }
     rss_limit -= rss_intra;
     fprintf(stderr, "[I::%s] starting norm estimation...\n", __func__);
-    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, re_cuts, resolution, 1);
+    intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, re_cuts, resolution, 1, mq);
 
 #ifdef DEBUG_RAM_USAGE
     printf("[I::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
@@ -186,7 +186,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, re_cuts_
     }
     rss_limit -= rss_inter;
     fprintf(stderr, "[I::%s] starting link estimation...\n", __func__);
-    inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, re_cuts, resolution, norm->r);
+    inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, re_cuts, resolution, norm->r, mq);
 
 #ifdef DEBUG_RAM_USAGE
     printf("[I::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
@@ -276,7 +276,7 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
 
     sdict = make_sdict_from_index(fai, ml);
     dict = make_asm_dict_from_sdict(sdict);
-    dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
+    dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution, 0);
     dist_thres = MAX(dist_thres, ec_min_window);
     fprintf(stderr, "[I::%s] dist threshold for contig error break: %d\n", __func__, dist_thres);
     asm_destroy(dict);
@@ -285,7 +285,7 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
     ec_round = err_no = 0;
     while (1) {
         dict = ec_round? make_asm_dict_from_agp(sdict, out1) : make_asm_dict_from_sdict(sdict);
-        link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg);
+        link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg, 0);
 #ifdef DEBUG_ERROR_BREAK
         printf("[I::%s] ec_round %u link matrix\n", __func__, ec_round);
         print_link_mat(link_mat, dict, stdout);
@@ -318,7 +318,7 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
     return ec_round;
 }
 
-int scaffold_error_break(char *fai, char *link_file, uint32_t ml, char *agp, int flank_size, double noise, char *out)
+int scaffold_error_break(char *fai, char *link_file, uint32_t ml, uint8_t mq, char *agp, int flank_size, double noise, char *out)
 {
     int dist_thres;
     sdict_t *sdict = make_sdict_from_index(fai, ml);
@@ -328,7 +328,7 @@ int scaffold_error_break(char *fai, char *link_file, uint32_t ml, char *agp, int
     //dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
     //dist_thres = MAX(dist_thres, ec_min_window);
     //fprintf(stderr, "[I::%s] dist threshold for scaffold error break: %d\n", __func__, dist_thres);
-    link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, noise, ec_move_avg);
+    link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, noise, ec_move_avg, mq);
 
 #ifdef DEBUG_ERROR_BREAK
     printf("[I::%s] link matrix\n", __func__);
@@ -366,7 +366,7 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats)
 #endif
 }
 
-int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec)
+int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec)
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
@@ -436,12 +436,12 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, char *out, int 
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, ml, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit);
+        re = run_scaffolding(fai, out_agp_break, link_file, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
                 sprintf(out_agp_break, "%s_r%02d_break.agp", out, r);
-                scaffold_error_break(fai, link_file, ml, out_agp, resolutions[r - 1], noise, out_agp_break);
+                scaffold_error_break(fai, link_file, ml, mq, out_agp, resolutions[r - 1], noise, out_agp_break);
             } else {
                 sprintf(out_agp_break, "%s", out_agp);
             }
@@ -489,7 +489,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, char *out, int 
 }
 
 #ifndef DEBUG_GT4G
-static int default_resolutions[13] = {10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000};
+static int default_resolutions[15] = {10000, 20000, 50000, 100000, 200000, 500000, 1000000, 2000000, 5000000, 10000000, 20000000, 50000000, 100000000, 200000000, 500000000};
 #else
 static int default_resolutions[13] = {50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000, 100000000, 250000000, 500000000};
 #endif
@@ -517,8 +517,12 @@ static int default_nr(char *fai, uint32_t ml)
         max_res = 20000000;
     else if (genome_size < 5000000000)
         max_res = 50000000;
-    else
+    else if (genome_size < 10000000000)
         max_res = 100000000;
+    else if (genome_size < 20000000000)
+        max_res = 200000000;
+    else
+        max_res = 500000000;
 
     nr = 0;
     while (nr < sizeof(default_resolutions) / sizeof(int) && default_resolutions[nr] <= max_res)
@@ -721,12 +725,12 @@ int main(int argc, char *argv[])
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BAM) to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bam_file(link_file, fai, ml, mq8, link_bin_file);
+        dump_links_from_bam_file(link_file, fai, ml, 0, link_bin_file);
     } else if (strcmp(ext, ".bed") == 0) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BED) to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bed_file(link_file, fai, ml, mq8, link_bin_file);
+        dump_links_from_bed_file(link_file, fai, ml, 0, link_bin_file);
     } else if (strcmp(ext, ".bin") == 0) {
         link_bin_file = malloc(strlen(link_file) + 1);
         sprintf(link_bin_file, "%s", link_file);
@@ -756,7 +760,7 @@ int main(int argc, char *argv[])
     printf("[I::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
-    ret = run_yahs(fai, agp, link_bin_file, ml, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec);
+    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);

@@ -800,7 +800,7 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
                             fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + cseg.y, ++t, sd->s[cseg.c >> 1].name, cseg.x + 1, cseg.x + cseg.y, "+-"[(cseg.c & 1) ^ ori]);
                             len += cseg.y;
                             if (k != nseg - 1 || j != qs - 1) {
-                                fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\tna\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ);
+                                fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\t%s\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
                                 len += GAP_SZ;
                             }
                         }

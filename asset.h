@@ -37,6 +37,9 @@
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define BUFF_SIZE 4096
 #define GAP_SZ 200
+#define BIN_H 0x5941485342494E56
+#define BIN_V 0x1
+#define LINK_EVIDENCE "proximity_ligation"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,6 +54,8 @@ int file_copy(char *fin, char *fout);
 int8_t is_read_pair(const char *rname0, const char *rname1);
 uint32_t div_ceil(uint64_t x, uint32_t y);
 uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g);
+void write_bin_header(FILE *fo);
+int is_valid_bin_header(int64_t magic_number);
 #ifdef __cplusplus
 }
 #endif

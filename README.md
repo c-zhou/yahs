@@ -25,9 +25,9 @@ With `-o` option, you can specify the prefix of the output files. It is `./yash.
 
 With `-a` option, you can specify a AGP format file to ask YaHS to do scaffolding with the scaffolds in the AGP file as the start point.
 
-With `-r` option, you can specify a range of resultions. It is `50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000` by default and the upper limit is automatically adjusted with the genome size.
+With `-r` option, you can specify a range of resultions (in ascending order). It is `10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000` by default and the upper limit is automatically adjusted by the genome size. For highly fragmented genome assemblies, you can try to start with higher resultions by adding smaller `-r` values.
 
-With `-e` option, you can specify the restriction enzyme(s) used by the Hi-C experiment. For example, `GATC` for the DpnII restriction enzyme used by the Dovetail Hi-C Kit; `GATC,GANT` and `CGATC,GANTC,CTNAG,TTAA` for Arima genomics 2-enzyme and 4-enzyme protocol, respectively. Sometimes, the specification of enzymes may not change the scaffolding result very much if not make it worse, especically when the base quality of the assembly is not very good, e.g., assembies constructed from noisy long reads.
+With `-e` option, you can specify the restriction enzyme(s) used by the Hi-C experiment. For example, `GATC` for the DpnII restriction enzyme used by the Dovetail Hi-C Kit; `GATC,GANT` and `CGATC,GANTC,CTNAG,TTAA` for Arima genomics 2-enzyme and 4-enzyme protocol, respectively. Sometimes, the specification of enzymes may not change the scaffolding result very much if not make it worse, especially when the base quality of the assembly is not very good, e.g., assembies constructed from noisy long reads.
 
 With `-l` option, you can specify the minimum contig length included for scaffolding.
 

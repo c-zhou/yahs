@@ -42,12 +42,13 @@ static double jc_realtime0;
 
 KHASH_SET_INIT_STR(str)
 
-static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scale, int count_gap, FILE *fo)
+static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
 {
     FILE *fp;
-    uint32_t i, i0, i1;
+    uint32_t i, i0, i1, m;
     uint64_t p0, p1;
-    uint32_t buffer[BUFF_SIZE], m;
+    int64_t magic_number;
+    uint8_t buffer[BUFF_SIZE * 17];
     long pair_c;
 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
@@ -58,13 +59,24 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scal
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
+    
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        exit(EXIT_FAILURE);
+    }
 
     pair_c = 0;
     while (1) {
-        m = fread(&buffer, sizeof(uint32_t), BUFF_SIZE, fp);
-        for (i = 0; i < m; i += 4) {
-            sd_coordinate_conversion(dict, buffer[i], buffer[i + 1], &i0, &p0, count_gap);
-            sd_coordinate_conversion(dict, buffer[i + 2], buffer[i + 3], &i1, &p1, count_gap);
+        m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
+
+        for (i = 0; i < m; i += 17) {
+            if (*(uint8_t *) (buffer + i + 16) < mq)
+                continue;
+
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, count_gap);
+            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, count_gap);
+            
             if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
                 fprintf(stderr, "[W::%s] sequence not found \n", __func__);
             } else {
@@ -73,10 +85,11 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, int scal
                 else
                     fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
             }
+            
+            ++pair_c;
         }
-        pair_c += m / 4;
 
-        if (m < BUFF_SIZE) {
+        if (m < BUFF_SIZE * 17) {
             if (ferror(fp))
                 return 1;
             break;
@@ -100,6 +113,7 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1;
     uint64_t p0, p1;
+    uint8_t q0, q1;
     int8_t buff;
     long rec_c, pair_c;
     
@@ -123,16 +137,24 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     rec_c = pair_c = 0;
     buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
+    
+        if (++rec_c % 1000000 == 0)
+              fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+    
         if (buff == 0) {
-            sscanf(line, "%s %u %u %s", cname0, &s0, &e0, rname0);
+            sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %u %u %s", cname1, &s1, &e1, rname1);
+            sscanf(line, "%s %u %u %s %hhu %*s", cname1, &s1, &e1, rname1, &q1);
             if (is_read_pair(rname0, rname1)) {
-                ++pair_c;
+                buff = 0;
+
+                if (q0 < mq || q1 < mq)
+                    continue;
                 
                 sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
                 sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
+                
                 if (i0 == UINT32_MAX) {
                     k = kh_put(str, hmseq, cname0, &absent);
                     if (absent) {
@@ -150,19 +172,19 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
                         fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
                     else
                         fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+                    
+                    ++pair_c;
                 }
-                buff = 0;
             } else {
+                buff = 1;
+            
                 strcpy(cname0, cname1);
                 s0 = s1;
                 e0 = e1;
+                q0 = q1;
                 strcpy(rname0, rname1);
-                buff = 1;
             }
         }
-
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
@@ -195,16 +217,16 @@ static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
 
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
-    // 0x4 0x100 0x400 0x800
-    if (b->core.flag & 0xD04)
+    // 0x4 0x100 0x200 0x400 0x800
+    if (b->core.flag & 0xF04)
         return 0;
     *cname = h->target_name[b->core.tid];
     if (b->core.qual < q) {
         *s = -1;
         *e = -1;
     } else {
-        *s = b->core.pos + 1;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
+        *s = b->core.pos;
+        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos);
     }
 
     return strdup(bam1_qname(b));
@@ -212,13 +234,13 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
 
 static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
 {
-    // 0x4 0x8 0x40 0x100 0x400 0x800
-    if (b->core.flag & 0xD4C)
+    // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
+    if (b->core.flag & 0xF4C)
         return 0;
     *cname0 = h->target_name[b->core.tid];
-    *s0 = b->core.pos + 1;
+    *s0 = b->core.pos;
     *cname1 = h->target_name[b->core.mtid];
-    *s1 = b->core.mpos + 1;
+    *s1 = b->core.mpos;
 
     return bam1_qname(b);
 }
@@ -263,6 +285,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     if (so == ORDER_NAME) {
         // sorted by read names
         while (bam_read1(fp, b) >= 0 ) {
+
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
 
@@ -276,9 +299,9 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                 if (!rname1)
                     continue;
                 if (strcmp(rname0, rname1) == 0) {
-                    ++pair_c;
+                    buff = 0;
 
-                    if (s0 > 0 && s1 >0) {
+                    if (s0 >= 0 && s1 >= 0) {
                         sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
                         sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
 
@@ -299,37 +322,40 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                                 fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
                             else
                                 fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+                            
+                            ++pair_c;
                         }
                     }
+
                     free(rname0);
                     free(rname1);
                     rname0 = 0;
                     rname1 = 0;
-                    buff = 0;
                 } else {
+                    buff = 1;
+
                     cname0 = cname1;
                     s0 = s1;
                     e0 = e1;
                     free(rname0);
                     rname0 = rname1;
                     rname1 = 0;
-                    buff = 1;
                 }
             }
         }
     } else {
         // sorted by coordinates or others
         if (mq > 0)
-            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hu suppressed \n", __func__, mq);
+            fprintf(stderr, "[W::%s] BAM file is not sorted by read name. Filtering by mapping quality %hhu suppressed \n", __func__, mq);
 
         while (bam_read1(fp, b) >= 0 ) {
+            
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c); 
             
             if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
                 continue;
 
-            ++pair_c;
             sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
             sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1, &i1, &p1, count_gap);
 
@@ -350,6 +376,8 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                     fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
                 else
                     fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+        
+                ++pair_c;
             }
         }
     }
@@ -611,7 +639,7 @@ static int main_pre(int argc, char *argv[])
         ret = make_juicer_pre_file_from_bed(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
     } else if (strcmp(ext, ".bin") == 0) {
         fprintf(stderr, "[I::%s] make juicer pre input from BIN file %s\n", __func__, link_file);
-        ret = make_juicer_pre_file_from_bin(link_file, agp1, fai, scale, !asm_mode, fo);
+        ret = make_juicer_pre_file_from_bin(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
     } else {
         fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin is expected\n", __func__);
         exit(EXIT_FAILURE);
@@ -736,7 +764,7 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
             fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tW\t%s\t%d\t%d\t%c\n", sid, slen + 1, slen + coords[cid * 3 + 2], ++fid, sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1, "-+"[sign]);
             slen += coords[cid * 3 + 2];
             while (*eptr != '\n') {
-                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tN\t%d\tscaffold\tyes\tna\n", sid, slen + 1, slen + GAP_SZ, ++fid, GAP_SZ);
+                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tN\t%d\tscaffold\tyes\t%s\n", sid, slen + 1, slen + GAP_SZ, ++fid, GAP_SZ, LINK_EVIDENCE);
                 slen += GAP_SZ;
                 
                 cid = strtol(eptr + 1, &fptr, 10);
