@@ -146,9 +146,9 @@ re_cuts_t *find_re_from_seqs(const char *f, uint32_t ml, char **enz_cs, int enz_
     fprintf(stderr, "[I::%s] NO. restriction enzyme cutting sites found in sequences: %ld\n", __func__, n_re);
     fprintf(stderr, "[I::%s] restriction enzyme cutting sites density: %.6f\n", __func__, re_cuts->density);
 #ifdef DEBUG_ENZ
-    printf("[I::%s] restriction enzyme cutting sites for individual sequences (n = %d)\n", __func__, n);
+    fprintf(stderr, "[DEBUG_ENZ::%s] restriction enzyme cutting sites for individual sequences (n = %d)\n", __func__, n);
     for (i = 0; i < n; ++i)
-        printf("[I::%s] %s %u %u %.6f\n", __func__, sdict->s[i].name, sdict->s[i].len, re_cuts->re[i].n, (double) re_cuts->re[i].n / sdict->s[i].len);
+        fprintf(stderr, "[DEBUG_ENZ::%s] %s %u %u %.6f\n", __func__, sdict->s[i].name, sdict->s[i].len, re_cuts->re[i].n, (double) re_cuts->re[i].n / sdict->s[i].len);
 #endif
 
     sd_destroy(sdict);
@@ -181,10 +181,10 @@ double **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution)
         
         dens[i] = ds;
 #ifdef DEBUG_ENZ
-        printf("DENS [%u/%u] (%u):", i, re_cuts->n, b);
+        fprintf(stderr, "[DEBUG_ENZ::%s] DENS [%u/%u] (%u):", __func__, i, re_cuts->n, b);
         for (j = 0; j < b; ++j)
-            printf(" %.6f", ds[j]);
-        printf("\n");
+            fprintf(stderr, " %.6f", ds[j]);
+        fprintf(stderr, "\n");
 #endif
     }
     return dens;
@@ -254,10 +254,10 @@ double **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict
         
         dens[i] = ds;
 #ifdef DEBUG_ENZ
-        printf("DENS1 [%u/%u] (%u):", i, n, b);
+        fprintf(stderr, "[DEBUG_ENZ::%s] DENS1 [%u/%u] (%u):", __func__, i, n, b);
         for (j = 0; j < b; ++j)
-            printf(" %.6f", ds[j]);
-        printf("\n");
+            fprintf(stderr, " %.6f", ds[j]);
+        fprintf(stderr, "\n");
 #endif
     }
 
@@ -322,10 +322,10 @@ double **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict
 
         dens[i] = ds;
 #ifdef DEBUG_ENZ
-        printf("DENS2 [%u/%u] (%u):", i, n, b);
+        fprintf(stderr, "[DEBUG_ENZ::%s] DENS2 [%u/%u] (%u):", __func__, i, n, b);
         for (j = 0; j < b << 1; ++j)
-            printf(" %.6f", ds[j]);
-        printf("\n");
+            fprintf(stderr, " %.6f", ds[j]);
+        fprintf(stderr, "\n");
 #endif
 
     }

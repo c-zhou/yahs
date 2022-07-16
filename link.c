@@ -41,7 +41,6 @@
 #include "link.h"
 #include "asset.h"
 
-#undef DEBUG
 #undef DEBUG_NOISE
 #undef DEBUG_ORIEN
 #undef DEBUG_INTRA
@@ -343,7 +342,7 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
         //    if (link->link[j] < .5)
         //        link->link[j] = -FLT_MAX;
 #ifdef DEBUG_INTRA
-        printf("[I::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
+        fprintf(stderr, "[DEBUG_INTRA::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
 #endif
     }
 
@@ -434,8 +433,8 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, u
         //for (j = 0; j < p; ++j)
         //    if (link->link[j] < .5)
         //        link->link[j] = -FLT_MAX;
-#ifdef DEBUG
-        printf("[I::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
+#ifdef DEBUG_INTRA
+        fprintf(stderr, "[DEBUG_INTRA::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
 #endif
     }
 
@@ -563,7 +562,7 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
         }
     }
 #ifdef DEBUG
-    printf("[I::%s] %ld read pairs processed, %ld intra links \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld intra links \n", __func__, pair_c, intra_c);
 #endif
     fclose(fp);
 
@@ -683,8 +682,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     }
 
 #ifdef DEBUG
-    printf("[I::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
-    printf("[I::%s] within radius %d: %ld\n", __func__, radius, radius_c);
+    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
+    fprintf(stderr, "[DEBUG::%s] within radius %d: %ld\n", __func__, radius, radius_c);
 #endif
     fclose(fp);
 
@@ -720,7 +719,7 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     }
     link_mat->noise = a > 0? noise_c / a : 0;
 #ifdef DEBUG_NOISE
-    printf("[I::%s] noise links: %ld; area: %.12f; noise estimation: %.12f\n", __func__, noise_c, a, link_mat->noise);
+    fprintf(stderr, "[DEBUG_NOISE::%s] noise links: %ld; area: %.12f; noise estimation: %.12f\n", __func__, noise_c, a, link_mat->noise);
 #endif
 
     return link_mat;
@@ -739,8 +738,8 @@ void norm_destroy(norm_t *norm)
 }
 
 int dcmp (const void *a, const void *b) {
-   double cmp = *(double *) a - *(double *) b;
-   return cmp > 0? 1 : ( cmp < 0? -1 : 0);
+    double cmp = *(double *) a - *(double *) b;
+    return cmp > 0? 1 : ( cmp < 0? -1 : 0);
 }
 
 norm_t *calc_norms(intra_link_mat_t *link_mat)
@@ -974,7 +973,7 @@ int estimate_noise(inter_link_mat_t *link_mat)
 
 #ifdef DEBUG_NOISE
     for (i = 0; i < bin; ++i)
-        printf("[I::%s] noise bin %d %d\n", __func__, i, hist[i]);
+        fprintf(stderr, "[DEBUG_NOISE::%s] noise bin %d %d\n", __func__, i, hist[i]);
 #endif
 
     n = 0;
@@ -1006,7 +1005,7 @@ void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimate
     if (use_estimated_noise) {
         // noise = estimate_noise(link_mat);
         noise = link_mat->noise;
-        fprintf(stderr, "[I::%s] using noise level %.12f\n", __func__, noise);
+        fprintf(stderr, "[I::%s] using noise level %.3f\n", __func__, noise);
     }
 
     r = link_mat->r;
@@ -1112,7 +1111,7 @@ loop_i_end:
     }
     
     *la = c0 / c;
-    fprintf(stderr, "[I::%s] average link count: %.12f %.12f %.12f\n", __func__, c0, c, *la);
+    fprintf(stderr, "[I::%s] average link count: %.3f %.3f %.3f\n", __func__, c0, c, *la);
     
     free(norms);
 }
@@ -1176,7 +1175,7 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
     }
 
 #ifdef DEBUG
-    printf("[I::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
+    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
 #endif
     fclose(fp);
     
@@ -1206,7 +1205,7 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
         for (i1 = i0 + 1; i1 < n; ++i1) {
             d = directs[(long) (n * 2 - i0 - 1) * i0 / 2 + i1 - i0 - 1];
             if (d >=0)
-                printf("[I::%s] #Oriens: %s %s %hhi \n", __func__, dict->s[i0].name, dict->s[i1].name, d);
+                fprintf(stderr, "[DEBUG_ORIEN::%s] #Oriens: %s %s %hhi \n", __func__, dict->s[i0].name, dict->s[i1].name, d);
         }
     }
 #endif
@@ -1275,7 +1274,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
         }
 
 #ifdef DEBUG_ORIEN
-        printf("[I::%s] %d %.0f %.0f %d %d [%.3f %.3f %.3f %.3f] [%.0f  %.0f  %.0f  %.0f] %s %s\n", __func__, inter_link->linkt, ma, sma, inter_link->b0, inter_link->b1, inter_link->norms[0], inter_link->norms[1], inter_link->norms[2], inter_link->norms[3], area[0], area[1], area[2], area[3], dict->s[inter_link->c0].name, dict->s[inter_link->c1].name);
+        fprintf(stderr, "[DEBUG_ORIEN::%s] %d %.0f %.0f %d %d [%.3f %.3f %.3f %.3f] [%.0f  %.0f  %.0f  %.0f] %s %s\n", __func__, inter_link->linkt, ma, sma, inter_link->b0, inter_link->b1, inter_link->norms[0], inter_link->norms[1], inter_link->norms[2], inter_link->norms[3], area[0], area[1], area[2], area[3], dict->s[inter_link->c0].name, dict->s[inter_link->c1].name);
 #endif
     }
 }
@@ -1303,8 +1302,8 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, i
         *e = -1;
         *q = 0;
     } else {
-        *s = b->core.pos;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos);
+        *s = b->core.pos + 1;
+        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
         *q = b->core.qual;
     }
     
@@ -1317,9 +1316,9 @@ static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *
     if (b->core.flag & 0xF4C)
         return 0;
     *cname0 = h->target_name[b->core.tid];
-    *s0 = b->core.pos;
+    *s0 = b->core.pos + 1;
     *cname1 = h->target_name[b->core.mtid];
-    *s1 = b->core.mpos;
+    *s1 = b->core.mpos + 1;
 
     return bam1_qname(b);
 }
@@ -1537,6 +1536,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
+
     fo = fopen(out, "w");
     if (fo == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
@@ -1553,7 +1553,6 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
         
         if (++rec_c % 1000000 == 0)
             fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
-
     
         if (buff == 0) {
             sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
@@ -1579,8 +1578,9 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else {
-                    p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
-                    p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
+                    // from zero-based to one-based
+                    p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1) + 1;
+                    p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1) + 1;
                     if (i0 > i1) {
                         SWAP(uint32_t, i0, i1);
                         SWAP(uint32_t, p0, p1);

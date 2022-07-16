@@ -38,21 +38,18 @@
 #include "break.h"
 #include "asset.h"
 
-#undef DEBUG
 #undef REMOVE_NOISE
 #undef DEBUG_LOCAL_BREAK
 
-link_t *link_init(uint32_t s, uint32_t n)
+static void link_init(link_t *link, uint32_t s, uint32_t n)
 {
-    link_t *link = (link_t *) malloc(sizeof(link_t));
     link->s = s;
     link->n = n;
-    int64_t *link_c = (int64_t *) malloc(n * sizeof(int64_t));
+    int64_t *link_c = (int64_t *) malloc(sizeof(int64_t) * n);
     int64_t i;
     for (i = 0; i < n; ++i)
         link_c[i] = i << 32;
     link->link = link_c;
-    return link;
 }
 
 link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b)
@@ -60,11 +57,11 @@ link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b)
     link_mat_t *link_mat = (link_mat_t *) malloc(sizeof(link_mat_t));
     link_mat->b = b;
     link_mat->n = dict->n;
-    link_mat->link = (link_t *) malloc(link_mat->n * sizeof(link_t));
+    link_mat->link = (link_t *) malloc(sizeof(link_t) * link_mat->n);
 
     uint32_t i;
     for (i = 0; i < link_mat->n; ++i)
-        link_mat->link[i] = *link_init(i, div_ceil(dict->s[i].len, b));
+        link_init(link_mat->link + i, i, div_ceil(dict->s[i].len, b));
     
     return link_mat;
 }
@@ -142,7 +139,7 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     free(link_c);
 
 #ifdef DEBUG
-      printf("[I::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
 #endif
     return i * resolution;
 }
@@ -250,7 +247,7 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     fclose(fp);
 
 #ifdef DEBUG
-    printf("[I::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
 #endif
     
     int64_t *link;
@@ -363,7 +360,7 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
                 }
                 add_break_point(bp1, seg.a);
 #ifdef DEBUG_LOCAL_BREAK
-                printf("[I::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[(MAX(seg.a, 1) - 1) / bin_size], mcnt);
+                fprintf(stderr, "[DEBUG_LOCAL_BREAK::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[(MAX(seg.a, 1) - 1) / bin_size], mcnt);
 #endif
             }
         }

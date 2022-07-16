@@ -43,7 +43,6 @@
 
 #define YAHS_VERSION "1.2a"
 
-#undef DEBUG
 #undef DEBUG_ERROR_BREAK
 #undef DEBUG_GRAPH_PRUNE
 #undef DEBUG_OPTIONS
@@ -51,6 +50,7 @@
 #undef DEBUG_QLF
 #undef DEBUG_ENZ
 #undef DEBUG_GT4G
+#undef DEBUG_LINK
 
 #define ENOMEM_ERR 15
 #define ENOBND_ERR 14
@@ -74,6 +74,9 @@ static int ec_dual_break_thresh = 250000;
 #endif
 static double ec_min_frac = .8;
 static double ec_fold_thresh = .2;
+
+static uint64_t n_stats[10];
+static uint32_t l_stats[10];
 
 double qbinom(double, double, double, int, int);
 
@@ -112,7 +115,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
                 if (norm >= min_norm) {
                     if (norm < qla) {
 #ifdef DEBUG_QLF
-                        printf("#Edge rejected by QL filter: %s %s %u %u %.3f (< %.3f)\n", dict->s[c0].name, dict->s[c1].name, j, link->n0, norm, qla);
+                        fprintf(stderr, "[DEBUG_QLF::%s] #Edge rejected by QL filter: %s %s %u %u %.3f (< %.3f)\n", __func__, dict->s[c0].name, dict->s[c1].name, j, link->n0, norm, qla);
 #endif
                         continue;
                     }
@@ -140,7 +143,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     for (i = 0; i < dict->n; ++i)
         len += dict->s[i].len;
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] #sequences loaded %d = %lubp\n", __func__, dict->n, len);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #sequences loaded %d = %lubp\n", __func__, dict->n, len);
 #endif
 
     long rss_intra, rss_inter;
@@ -160,9 +163,9 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     intra_link_mat_t *intra_link_mat = intra_link_mat_from_file(link_file, dict, re_cuts, resolution, 1, mq);
 
 #ifdef DEBUG_RAM_USAGE
-    printf("[I::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
-    printf("[I::%s] RAM intra: %.3fGB\n", __func__, (double) rss_intra / GB);
-    printf("[I::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM intra: %.3fGB\n", __func__, (double) rss_intra / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
 #endif
 
     norm_t *norm = calc_norms(intra_link_mat);
@@ -189,9 +192,9 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     inter_link_mat_t *inter_link_mat = inter_link_mat_from_file(link_file, dict, re_cuts, resolution, norm->r, mq);
 
 #ifdef DEBUG_RAM_USAGE
-    printf("[I::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
-    printf("[I::%s] RAM inter: %.3fGB\n", __func__, (double) rss_inter / GB);
-    printf("[I::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM  peak: %.3fGB\n", __func__, (double) peakrss() / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM inter: %.3fGB\n", __func__, (double) rss_inter / GB);
+    fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
 #endif
 
     *noise = inter_link_mat->noise / resolution / resolution;
@@ -203,7 +206,8 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     calc_link_directs(inter_link_mat, .1, dict, directs);
     free(directs);
 
-#ifdef DEBUG
+#ifdef DEBUG_LINK
+    fprintf(stderr, "[DEBUG_LINK::%s] print_inter_link_norms\n", __func__);
     print_inter_link_norms(stderr, inter_link_mat, dict);
 #endif
 
@@ -211,23 +215,23 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     graph_t *g = build_graph_from_links(inter_link_mat, dict, .1, la);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] scaffolding graph (before pruning) in GV format\n", __func__);
-    graph_print_gv(g, stdout);
-    printf("[I::%s] scaffolding graph (before pruning) in GFA format\n", __func__);
-    graph_print(g, stdout, 1);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] scaffolding graph (before pruning) in GV format\n", __func__);
+    graph_print_gv(g, stderr);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] scaffolding graph (before pruning) in GFA format\n", __func__);
+    graph_print(g, stderr, 1);
 #endif
 
     uint64_t n_arc;
     n_arc = g->n_arc;
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] number edges before trimming: %ld\n", __func__, n_arc);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] number edges before trimming: %ld\n", __func__, n_arc);
     int round = 0;
 #endif
     while (1) {
         trim_graph_simple_filter(g, .1, .7, .1, 0);
 #ifdef DEBUG_GRAPH_PRUNE
-        printf("[I::%s] number edges after simple trimming round %d: %ld\n", __func__, round, g->n_arc);
-        graph_print_gv(g, stdout);
+        fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] number edges after simple trimming round %d: %ld\n", __func__, round, g->n_arc);
+        graph_print_gv(g, stderr);
 #endif
         trim_graph_tips(g);
         trim_graph_blunts(g);
@@ -238,8 +242,8 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
         trim_graph_weak_edges(g);
         trim_graph_self_loops(g);
 #ifdef DEBUG_GRAPH_PRUNE
-        printf("[I::%s] number edges after trimming round %d: %ld\n", __func__, ++round, g->n_arc);
-        graph_print_gv(g, stdout);
+        fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] number edges after trimming round %d: %ld\n", __func__, ++round, g->n_arc);
+        graph_print_gv(g, stderr);
 #endif
         if (g->n_arc == n_arc)
             break;
@@ -249,10 +253,10 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
     trim_graph_ambiguous_edges(g);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("[I::%s] scaffolding graph (after pruning) in GV format\n", __func__);
-    graph_print_gv(g, stdout);
-    printf("[I::%s] scaffolding graph (after pruning) in GFA format\n", __func__);
-    graph_print(g, stdout, 1);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] scaffolding graph (after pruning) in GV format\n", __func__);
+    graph_print_gv(g, stderr);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] scaffolding graph (after pruning) in GFA format\n", __func__);
+    graph_print(g, stderr, 1);
 #endif
 
     search_graph_path(g, g->sdict, out);
@@ -287,11 +291,14 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
         dict = ec_round? make_asm_dict_from_agp(sdict, out1) : make_asm_dict_from_sdict(sdict);
         link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg, 0);
 #ifdef DEBUG_ERROR_BREAK
-        printf("[I::%s] ec_round %u link matrix\n", __func__, ec_round);
-        print_link_mat(link_mat, dict, stdout);
+        fprintf(stderr, "[DEBUG_ERROR_BREAK::%s] ec_round %u link matrix\n", __func__, ec_round);
+        print_link_mat(link_mat, dict, stderr);
 #endif
         bp_n = 0;
         bp_t *breaks = detect_break_points(link_mat, ec_bin, ec_merge_thresh, ec_fold_thresh, ec_dual_break_thresh, &bp_n);
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] number contig breaks in round %u: %u\n", __func__, ec_round + 1, bp_n);
+#endif
         sprintf(out1, "%s_%02d.agp", out, ++ec_round);
         FILE *agp_out = fopen(out1, "w");
         write_break_agp(dict, breaks, bp_n, agp_out);
@@ -305,7 +312,7 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
         
         err_no += bp_n;
 #ifdef DEBUG_ERROR_BREAK
-        printf("[I::%s] bp_n %d\n", __func__, bp_n);
+        fprintf(stderr, "[DEBUG_ERROR_BREAK::%s] bp_n %d\n", __func__, bp_n);
 #endif
         if (!bp_n)
             break;
@@ -331,16 +338,19 @@ int scaffold_error_break(char *fai, char *link_file, uint32_t ml, uint8_t mq, ch
     link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, noise, ec_move_avg, mq);
 
 #ifdef DEBUG_ERROR_BREAK
-    printf("[I::%s] link matrix\n", __func__);
-    print_link_mat(link_mat, dict, stdout);
+    fprintf(stderr, "[DEBUG_ERROR_BREAK::%s] link matrix\n", __func__);
+    print_link_mat(link_mat, dict, stderr);
 #endif
 
     uint32_t bp_n = 0;
     bp_t *breaks = detect_break_points_local_joint(link_mat, ec_bin, ec_fold_thresh, flank_size, dict, &bp_n);
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG::%s] number scaffold breaks: %u\n", __func__, bp_n);
+#endif
+
     FILE *agp_out = fopen(out, "w");
     write_break_agp(dict, breaks, bp_n, agp_out);
     fclose(agp_out);
-    
     link_mat_destroy(link_mat);
     asm_destroy(dict);
     sd_destroy(sdict);
@@ -352,17 +362,19 @@ int scaffold_error_break(char *fai, char *link_file, uint32_t ml, uint8_t mq, ch
     return bp_n;
 }
 
-static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats)
+static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 {
 #ifdef DEBUG
     int i;
-    printf("[I::%s] assembly stats:\n", __func__);
+    fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
     for (i = 0; i < 10; ++i)
-        printf("[I::%s] N%d: %lu (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
+        fprintf(stderr, "[I::%s] N%d: %lu (n = %u)\n", __func__, (i + 1) * 10, n_stats[i], l_stats[i]);
 #else
     fprintf(stderr, "[I::%s] assembly stats:\n", __func__);
     fprintf(stderr, "[I::%s]  N%d: %lu (n = %u)\n", __func__, 50, n_stats[4], l_stats[4]);
     fprintf(stderr, "[I::%s]  N%d: %lu (n = %u)\n", __func__, 90, n_stats[8], l_stats[8]);
+    if (all)
+        fprintf(stderr, "[I::%s]  N%d: %lu (n = %u)\n", __func__, 100, n_stats[9], l_stats[9]);
 #endif
 }
 
@@ -370,8 +382,6 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
-    uint64_t *n_stats;
-    uint32_t *l_stats;
     double noise;
     FILE *fo;
     sdict_t *sdict;
@@ -388,25 +398,38 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
     out_agp_break = (char *) malloc(strlen(out) + 35);
 
     if (agp == 0 && no_contig_ec == 0) {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] perform contig error break...\n", __func__);
+#endif
         sprintf(out_agp_break, "%s_inital_break", out);
         ec_round = contig_error_break(fai, link_file, ml, out_agp_break);
         sprintf(out_agp_break, "%s_inital_break_%02d.agp", out, ec_round);
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] contig error break done\n", __func__);
+#endif
     } else {
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] no contig error break...\n", __func__);
+#endif
         if (agp != 0) {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG::%s] use input AGP file\n", __func__);
+#endif
             if (strlen(agp) > strlen(out)) {
                 free(out_agp_break);
                 out_agp_break = (char *) malloc(strlen(agp) + 35);
             }
             sprintf(out_agp_break, "%s", agp);
         } else {
+#ifdef DEBUG
+            fprintf(stderr, "[DEBUG::%s] make AGP file from input FASTA file\n", __func__);
+#endif
             sprintf(out_agp_break, "%s_no_break.agp", out);
             write_sdict_to_agp(sdict, out_agp_break);
         }
     }
 
     r = rc = 0;
-    n_stats = (uint64_t *) calloc(10, sizeof(uint64_t));
-    l_stats = (uint32_t *) calloc(10, sizeof(uint32_t));
     
     dict = make_asm_dict_from_agp(sdict, out_agp_break);
     if (dict->n > MAX_N_SEQ) {
@@ -417,7 +440,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
         return 1;
     }
     asm_sd_stats(dict, n_stats, l_stats);
-    print_asm_stats(n_stats, l_stats);
+    print_asm_stats(n_stats, l_stats, 1);
     asm_destroy(dict);
 
     while (r++ < nr) {
@@ -440,26 +463,46 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG::%s] perform scaffold error break\n", __func__);
+#endif
+
                 sprintf(out_agp_break, "%s_r%02d_break.agp", out, r);
                 scaffold_error_break(fai, link_file, ml, mq, out_agp, resolutions[r - 1], noise, out_agp_break);
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG::%s] scaffold error break done\n", __func__);
+#endif
+
             } else {
+#ifdef DEBUG
+                fprintf(stderr, "[DEBUG::%s] no scaffold error break\n", __func__);
+#endif
                 sprintf(out_agp_break, "%s", out_agp);
             }
             ++rc;
         }
         asm_destroy(dict);
 
+        fprintf(stderr, "[I::%s] scaffolding round %d done\n", __func__, r);
+
         dict = make_asm_dict_from_agp(sdict, out_agp_break);
         asm_sd_stats(dict, n_stats, l_stats);
-        print_asm_stats(n_stats, l_stats);
+        print_asm_stats(n_stats, l_stats, 0);
         asm_destroy(dict);
     }
+
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG::%s] make final output...\n", __func__);
+#endif
 
     sprintf(out_agp, "%s_scaffolds_final.agp", out);
     // output sorted agp by scaffold size instead of file copy
     // file_copy(out_agp_break, out_agp);
     if (ml > 0) {
         // add short sequences to dict
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] add unused short sequences back...\n", __func__);
+#endif
         sd_destroy(sdict);
         sdict = make_sdict_from_index(fai, 0);
         dict = make_asm_dict_from_agp(sdict, out_agp_break);
@@ -477,9 +520,6 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
     
     asm_destroy(dict);
     sd_destroy(sdict);
-    
-    free(n_stats);
-    free(l_stats);
 
     free(out_agp);
     free(out_fn);
@@ -705,9 +745,9 @@ int main(int argc, char *argv[])
             pch = strtok(NULL, ",");
         }
 #ifdef DEBUG_ENZ
-        printf("[I::%s] list of restriction enzyme cutting sites (n = %ld)\n", __func__, enz_cs.n);
+        fprintf(stderr, "[DEBUG_ENZ::%s] list of restriction enzyme cutting sites (n = %ld)\n", __func__, enz_cs.n);
         for (i = 0; i < enz_cs.n; ++i)
-            printf("[I::%s] %s\n", __func__, enz_cs.a[i]);
+            fprintf(stderr, "[DEBUG_ENZ::%s] %s\n", __func__, enz_cs.a[i]);
 #endif
         
         re_cuts = find_re_from_seqs(fa, ml, enz_cs.a, enz_cs.n);
@@ -742,22 +782,22 @@ int main(int argc, char *argv[])
     }
 
 #ifdef DEBUG_OPTIONS
-    printf("[I::%s] list of options:\n", __func__);
-    printf("[I::%s] fa:    %s\n", __func__, fa);
-    printf("[I::%s] link:  %s\n", __func__, link_file);
-    printf("[I::%s] linkb: %s\n", __func__, link_bin_file);
-    printf("[I::%s] agp:   %s\n", __func__, agp);
-    printf("[I::%s] res:   %s\n", __func__, restr);
-    printf("[I::%s] RE:    %s\n", __func__, ecstr);
-    printf("[I::%s] minl:  %d\n", __func__, ml);
-    printf("[I::%s] minq:  %hhu\n", __func__, mq8);
-    printf("[I::%s] nr:    %d\n", __func__, nr);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] list of options:\n", __func__);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] fa:    %s\n", __func__, fa);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] link:  %s\n", __func__, link_file);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] linkb: %s\n", __func__, link_bin_file);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] agp:   %s\n", __func__, agp);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] res:   %s\n", __func__, restr);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] RE:    %s\n", __func__, ecstr);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] minl:  %d\n", __func__, ml);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] minq:  %hhu\n", __func__, mq8);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] nr:    %d\n", __func__, nr);
     int i;
     for (i = 0; i < nr; ++i)
-        printf("[I::%s] nr=%d:  %d\n", __func__, i, resolutions[i]);
-    printf("[I::%s] out:   %s\n", __func__, out);
-    printf("[I::%s] ec[C]: %d\n", __func__, no_contig_ec);
-    printf("[I::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
+        fprintf(stderr, "[DEBUG_OPTIONS::%s] nr=%d:  %d\n", __func__, i, resolutions[i]);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] out:   %s\n", __func__, out);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[C]: %d\n", __func__, no_contig_ec);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
     ret = run_yahs(fai, agp, link_bin_file, ml, mq8, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec);
@@ -776,6 +816,13 @@ int main(int argc, char *argv[])
         }
         write_fasta_file_from_agp(fa, agp_final, fo, 60, 0);
         fclose(fo);
+
+        sdict_t *sdict = make_sdict_from_index(fai, 0);
+        asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp_final);
+        asm_sd_stats(dict, n_stats, l_stats);
+        print_asm_stats(n_stats, l_stats, 1);
+        asm_destroy(dict);
+        sd_destroy(sdict);
     }
 
     if (fai)

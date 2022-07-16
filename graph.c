@@ -35,7 +35,6 @@
 #include "graph.h"
 #include "asset.h"
 
-#undef DEBUG
 #undef DEBUG_GRAPH_PRUNE
 
 #define graph_arc_key(a) ((a).v)
@@ -198,20 +197,20 @@ void graph_clean(graph_t *g, int shear)
         }
     }
     g->n_arc = n;
-#ifdef DEBUG
-    printf("[I::%s] graph cleaned: #arcs %lu -> %ld\n", __func__, n_arc, n);
+#ifdef DEBUG_GRAPH_PRUNE
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] graph cleaned: #arcs %lu -> %ld\n", __func__, n_arc, n);
 #endif
     if (shear) {
         uint64_t m = 16;
-#ifdef DEBUG
+#ifdef DEBUG_GRAPH_PRUNE
         uint64_t m_arc = g->m_arc;
 #endif
         while (m < n) 
             m <<= 1;
         g->arc = (graph_arc_t *) realloc(g->arc, m * sizeof(graph_arc_t));
         g->m_arc = m;
-#ifdef DEBUG
-        printf("[I::%s] memory sheared: #arcs %lu -> %ld\n", __func__, m_arc, m);
+#ifdef DEBUG_GRAPH_PRUNE
+        fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] memory sheared: #arcs %lu -> %ld\n", __func__, m_arc, m);
 #endif
     }
 
@@ -267,8 +266,8 @@ int graph_remove_multi_arcs(graph_t *g)
             }
         }
     }
-#ifdef DEBUG
-    printf("number multi-arcs deleted: %d\n", n_del);
+#ifdef DEBUG_GRAPH_PRUNE
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] number multi-arcs deleted: %d\n", __func__, n_del);
 #endif
     graph_clean(g, 1);
     return n_del;
@@ -303,8 +302,8 @@ int graph_add_symm_arcs(graph_t *g)
             continue;
         graph_add_arc(g, w^1, v^1, -1, 0, .0);
     }
-#ifdef DEBUG
-    printf("number symm-arcs added: %d\n", n_add);
+#ifdef DEBUG_GRAPH_PRUNE
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] number symm-arcs added: %d\n", __func__, n_add);
 #endif
     graph_arc_sort(g);
     graph_arc_index(g);
@@ -422,7 +421,7 @@ int trim_graph_simple_filter(graph_t *g, double min_wt, double min_diff_h, doubl
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del simple filter: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del simple filter: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -470,7 +469,7 @@ int trim_graph_tips(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del tips: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del tips: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -507,7 +506,7 @@ int trim_graph_blunts(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del blunts: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del blunts: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -544,7 +543,7 @@ int trim_graph_repeats(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del repeats: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del repeats: %u\n", __func__, n_del);
 #endif
     
     return n_del;
@@ -567,7 +566,7 @@ int trim_graph_self_loops(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del self loops: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del self loops: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -600,7 +599,7 @@ int trim_graph_transitive_edges(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del transitive edges: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del transitive edges: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -665,7 +664,7 @@ int trim_graph_pop_undirected(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#solved undirected: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #solved undirected: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -697,7 +696,7 @@ int trim_graph_weak_edges(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del weak edges: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del weak edges: %u\n", __func__, n_del);
 #endif
 
     return n_del;
@@ -715,7 +714,7 @@ int trim_graph_ambiguous_edges(graph_t *g)
     graph_clean(g, 1);
 
 #ifdef DEBUG_GRAPH_PRUNE
-    printf("#del ambiguous edges: %u\n", n_del);
+    fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] #del ambiguous edges: %u\n", __func__, n_del);
 #endif
 
     return n_del;

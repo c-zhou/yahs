@@ -37,7 +37,7 @@
 #include "ksort.h"
 #include "kseq.h"
 
-#undef DEBUG
+#undef DEBUG_DICT
 
 KSEQ_INIT(gzFile, gzread, gzseek)
 
@@ -419,11 +419,11 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     }
     asm_put(d, name, a, n, s - n);
     d->sdict = sdict;
-#ifdef DEBUG
+#ifdef DEBUG_DICT
     for (int i = 0; i < s; ++i)
-        fprintf(stderr, "%u %lu %u %u %u\n", d->seg[i].s, d->seg[i].a, d->seg[i].c, d->seg[i].x, d->seg[i].y);
+        fprintf(stderr, "[DEBUG_DICT::%s] %u %lu %u %u %u\n", __func__, d->seg[i].s, d->seg[i].a, d->seg[i].c, d->seg[i].x, d->seg[i].y);
     for (int i = 0; i < d->n; ++i)
-        fprintf(stderr, "%s %lu %u %u\n", d->s[i].name, d->s[i].len, d->s[i].n, d->s[i].s);
+        fprintf(stderr, "[DEBUG_DICT::%s] %s %lu %u %u\n", __func__, d->s[i].name, d->s[i].len, d->s[i].n, d->s[i].s);
 #endif
     asm_index(d);
 

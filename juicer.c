@@ -152,8 +152,8 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
                 if (q0 < mq || q1 < mq)
                     continue;
                 
-                sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
-                sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
+                sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1) + 1, &i0, &p0, count_gap);
+                sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1) + 1, &i1, &p1, count_gap);
                 
                 if (i0 == UINT32_MAX) {
                     k = kh_put(str, hmseq, cname0, &absent);
@@ -225,8 +225,8 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
         *s = -1;
         *e = -1;
     } else {
-        *s = b->core.pos;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos);
+        *s = b->core.pos + 1;
+        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
     }
 
     return strdup(bam1_qname(b));
@@ -238,9 +238,9 @@ static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *
     if (b->core.flag & 0xF4C)
         return 0;
     *cname0 = h->target_name[b->core.tid];
-    *s0 = b->core.pos;
+    *s0 = b->core.pos + 1;
     *cname1 = h->target_name[b->core.mtid];
-    *s1 = b->core.mpos;
+    *s1 = b->core.mpos + 1;
 
     return bam1_qname(b);
 }
@@ -654,7 +654,7 @@ static int main_pre(int argc, char *argv[])
     } else {
         if (scale) {
             fprintf(stderr, "[W::%s] maximum scaffold length exceeds %d (=%lu)\n", __func__, INT_MAX, max_s);
-            fprintf(stderr, "[W::%s] using scale factor: %d\n", __func__, scale);
+            fprintf(stderr, "[W::%s] using scale factor: %d\n", __func__, 1 << scale);
         }
         fprintf(stderr, "[I::%s] chromosome sizes for juicer_tools pre -\n", __func__);
         uint32_t i;
