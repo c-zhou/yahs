@@ -37,6 +37,8 @@ With `--no-contig-ec` option, you can skip the initial assembly error correction
 
 With `--no-scaffold-ec` option, YaHS will skip the scaffolding error check in each round. There will be no `*_r[0-9]{2}_break.agp` AGP output files.
 
+With `--no-mem-check` option, the runtime memory check is disabled. When running out of memory, the scaffolding process will terminate immediately instead of try lower resolutions.
+
 ## Generate HiC contact maps
 YaHS offers some auxiliary tools to help generating HiC contact maps for visualisation. A demo is provided in the bash script `scripts/run_yahs.sh`. To generate and visualise a HiC contact map, the following tools are required.
 

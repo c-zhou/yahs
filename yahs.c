@@ -41,7 +41,7 @@
 #include "enzyme.h"
 #include "asset.h"
 
-#define YAHS_VERSION "1.2a"
+#define YAHS_VERSION "1.2a.1"
 
 #undef DEBUG_ERROR_BREAK
 #undef DEBUG_GRAPH_PRUNE
