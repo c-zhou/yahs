@@ -143,12 +143,12 @@ re_cuts_t *find_re_from_seqs(const char *f, uint32_t ml, char **enz_cs, int enz_
 
     re_cuts->density = (double) n_re / genome_size;
 
-    fprintf(stderr, "[I::%s] NO. restriction enzyme cutting sites found in sequences: %ld\n", __func__, n_re);
+    fprintf(stderr, "[I::%s] number restriction enzyme cutting sites found in sequences: %ld\n", __func__, n_re);
     fprintf(stderr, "[I::%s] restriction enzyme cutting sites density: %.6f\n", __func__, re_cuts->density);
-#ifdef DEBUG_ENZ
-    fprintf(stderr, "[DEBUG_ENZ::%s] restriction enzyme cutting sites for individual sequences (n = %d)\n", __func__, n);
+#ifdef DEBUG
+    fprintf(stderr, "[DEBUG::%s] restriction enzyme cutting sites for individual sequences (n = %d)\n", __func__, n);
     for (i = 0; i < n; ++i)
-        fprintf(stderr, "[DEBUG_ENZ::%s] %s %u %u %.6f\n", __func__, sdict->s[i].name, sdict->s[i].len, re_cuts->re[i].n, (double) re_cuts->re[i].n / sdict->s[i].len);
+        fprintf(stderr, "[DEBUG::%s] %s %u %u %.6f\n", __func__, sdict->s[i].name, sdict->s[i].len, re_cuts->re[i].n, (double) re_cuts->re[i].n / sdict->s[i].len);
 #endif
 
     sd_destroy(sdict);

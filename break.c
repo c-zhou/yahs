@@ -332,7 +332,7 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
         seq = dict->s[i];
         link = link_mat->link[i].link;
         a = 0;
-        for (j = 1; j < seq.n; j++) {
+        for (j = 1; j < seq.n; ++j) {
             seg = segs[seq.s + j];
             s = (MAX(seg.a - MIN(flank_size, segs[seq.s + j - 1].y), 1) - 1) / bin_size;
             e = (MAX(seg.a + MIN(flank_size, seg.y), 1) - 1) / bin_size;

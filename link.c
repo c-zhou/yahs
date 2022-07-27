@@ -206,6 +206,10 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
             for (k = 0; k < 4; ++k) {
                 link->link[k] = (double *) calloc(p, sizeof(double));
                 link->linkb[k] = (double *) calloc(link->r, sizeof(double));
+                if (!link->link[k] || !link->linkb[k]) {
+                    fprintf(stderr, "[E::%s] memory allocation failure\n", __func__);
+                    exit(EXIT_FAILURE);
+                }
             }
 
             // calculate relative areas for each cell 
@@ -314,6 +318,10 @@ intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
         a = ((double) dict->s[i].len - (double) (b - 1) * resolution) / resolution;
         p = (long) b * (b + 1) / 2;
         link->link = (double *) calloc(p, sizeof(double));
+        if (!link->link) {
+            fprintf(stderr, "[E::%s] memory allocation failure\n", __func__);
+            exit(EXIT_FAILURE);
+        }
         if (re_dens) {
             dens = re_dens[i];
             for (j = 0; j < b; ++j) {
@@ -406,6 +414,10 @@ intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, u
         a = ((double) dict->s[i].len - (double) (b - 1) * resolution) / resolution;
         p = (long) b * (b + 1) / 2;
         link->link = (double *) calloc(p, sizeof(double));
+        if (!link->link) {
+            fprintf(stderr, "[E::%s] memory allocation failure\n", __func__);
+            exit(EXIT_FAILURE);
+        }
         if (re_dens) {
             dens = re_dens[i];
             for (j = 0; j < b; ++j) {

@@ -132,7 +132,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit)
+int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit, int no_mem_check)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai, ml);
@@ -148,7 +148,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
 
     long rss_intra, rss_inter;
 
-    rss_intra = estimate_intra_link_mat_init_rss(dict, resolution);
+    rss_intra = no_mem_check? 0 : estimate_intra_link_mat_init_rss(dict, resolution);
     if ((rss_limit >= 0 && rss_intra > rss_limit) || rss_intra < 0) {
         // no enough memory
         fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
@@ -177,7 +177,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t 
         return ENOBND_ERR;
     }
 
-    rss_inter = estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
+    rss_inter = no_mem_check? 0 : estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
     if ((rss_limit >= 0 && rss_inter > rss_limit) || rss_inter < 0) {
         // no enough memory
         fprintf(stderr, "[I::%s] No enough memory. Try higher resolutions... End of scaffolding round.\n", __func__);
@@ -378,7 +378,7 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 #endif
 }
 
-int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec)
+int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
@@ -391,6 +391,8 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
     ram_limit(&rss_total, &rss_limit);
     fprintf(stderr, "[I::%s] RAM total: %.3fGB\n", __func__, (double) rss_total / GB);
     fprintf(stderr, "[I::%s] RAM limit: %.3fGB\n", __func__, (double) rss_limit / GB);
+    if (no_mem_check)
+        fprintf(stderr, "[I::%s] RAM check disabled\n", __func__);
 
     sdict = make_sdict_from_index(fai, ml);
     out_fn = (char *) malloc(strlen(out) + 35);
@@ -459,7 +461,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, cha
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit);
+        re = run_scaffolding(fai, out_agp_break, link_file, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit, no_mem_check);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
@@ -580,6 +582,9 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "    -e STR            restriction enzyme cutting sites [none]\n");
     fprintf(fp_help, "    -l INT            minimum length of a contig to scaffold [0]\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
+    fprintf(fp_help, "    --no-contig-ec    do not do contig error correction\n");
+    fprintf(fp_help, "    --no-scaffold-ec  do not do scaffold error correction\n");
+    fprintf(fp_help, "    --no-mem-check    do not do memory check at runtime\n");
     fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT            verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    --version         show version number\n");
@@ -588,6 +593,7 @@ static void print_help(FILE *fp_help)
 static ko_longopt_t long_options[] = {
     { "no-contig-ec",   ko_no_argument, 301 },
     { "no-scaffold-ec", ko_no_argument, 302 },
+    { "no-mem-check",   ko_no_argument, 303 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -606,7 +612,7 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec;
+    int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec, no_mem_check;
 
     const char *opt_str = "a:e:r:o:l:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
@@ -614,7 +620,7 @@ int main(int argc, char *argv[])
     int c, ret;
     FILE *fp_help = stderr;
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
-    no_contig_ec = no_scaffold_ec = 0;
+    no_contig_ec = no_scaffold_ec = no_mem_check = 0;
     mq = 10;
     ml = 0;
     ecstr = 0;
@@ -631,11 +637,14 @@ int main(int argc, char *argv[])
         } else if (c == 'q') {
             mq = atoi(opt.arg);
         } else if (c == 'e') {
-            ecstr = opt.arg;
+            // make a copy of ecstr to make sure the CMD correct
+            ecstr = strdup(opt.arg);
         } else if (c == 301) {
             no_contig_ec = 1;
         } else if (c == 302) {
             no_scaffold_ec = 1;
+        } else if (c == 303 ) {
+            no_mem_check = 1;
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -744,10 +753,10 @@ int main(int argc, char *argv[])
             }
             pch = strtok(NULL, ",");
         }
-#ifdef DEBUG_ENZ
-        fprintf(stderr, "[DEBUG_ENZ::%s] list of restriction enzyme cutting sites (n = %ld)\n", __func__, enz_cs.n);
+#ifdef DEBUG
+        fprintf(stderr, "[DEBUG::%s] list of restriction enzyme cutting sites (n = %ld)\n", __func__, enz_cs.n);
         for (i = 0; i < enz_cs.n; ++i)
-            fprintf(stderr, "[DEBUG_ENZ::%s] %s\n", __func__, enz_cs.a[i]);
+            fprintf(stderr, "[DEBUG::%s] %s\n", __func__, enz_cs.a[i]);
 #endif
         
         re_cuts = find_re_from_seqs(fa, ml, enz_cs.a, enz_cs.n);
@@ -755,6 +764,8 @@ int main(int argc, char *argv[])
         for (i = 0; i < enz_cs.n; ++i)
             free(enz_cs.a[i]);
         kv_destroy(enz_cs);
+
+        free(ecstr);
     }
 
     if (out == 0)
@@ -800,7 +811,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
-    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec);
+    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec, no_mem_check);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);

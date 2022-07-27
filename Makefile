@@ -1,4 +1,4 @@
-CFLAGS=		-g -O3 -Wall -fno-strict-aliasing
+CFLAGS=		-g -O0 -Wall -fno-strict-aliasing
 CPPFLAGS=
 INCLUDES=
 OBJS=
