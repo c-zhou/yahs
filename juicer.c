@@ -891,27 +891,27 @@ static int main_post(int argc, char *argv[])
     return ret;
 }
 
-static int usage()
+static int usage(FILE *fo)
 {
-    fprintf(stderr, "\n");
-    fprintf(stderr, "Usage:   juicer <command> <arguments>\n");
-    fprintf(stderr, "Version: %s\n\n", JUICER_VERSION);
-    fprintf(stderr, "Command: pre       generate files compatible with Juicebox toolset\n");
-    fprintf(stderr, "         post      generate assembly files after Juicebox curation\n");
-    fprintf(stderr, "\n");
-    return 1;
+    fprintf(fo, "\n");
+    fprintf(fo, "Usage:   juicer <command> <arguments>\n");
+    fprintf(fo, "Version: %s\n\n", JUICER_VERSION);
+    fprintf(fo, "Command: pre       generate files compatible with Juicebox toolset\n");
+    fprintf(fo, "         post      generate assembly files after Juicebox curation\n");
+    fprintf(fo, "\n");
+    return fo == stdout? 0 : 1;
 }
 
 int main(int argc, char *argv[])
 {
     if (argc == 1)
-        return usage();
+        return usage(stderr);
+    if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
+        return usage(stdout);
     if (strcmp(argv[1], "pre") == 0)
         return main_pre(argc - 1, argv + 1);
     if (strcmp(argv[1], "post") == 0)
         return main_post(argc - 1, argv + 1);
-    else {
-        fprintf(stderr, "[E::%s] unrecognized command '%s'. Abort!\n", __func__, argv[1]);
-        return 1;
-    }
+    fprintf(stderr, "[E::%s] unrecognized command '%s'. Abort!\n", __func__, argv[1]);
+    return 1;
 }
