@@ -63,7 +63,7 @@ The `juicer_tools`'s `pre` command takes three positional parameters: the sorted
 Finally, the output file `out.hic` could be used for visualisation with Juicebox. More information about `juicer_tools` and Juicebox can be found [here]( https://github.com/aidenlab/juicer/wiki/Juicer-Tools-Quick-Start).
 
 ## Manual curation with Juicebox (JBAT)
-You can generate a HiC contact mapfile that can be loaded by Juicebox (JBAT) for manual editing with `juicer pre` by adding `-a` parameter. For example, 
+You can generate a HiC contact mapfile that can be loaded by Juicebox (JBAT, [Dudchenko et al. 2018](https://www.biorxiv.org/content/10.1101/254797v1)) for manual editing with `juicer pre` by adding `-a` parameter. For example, 
     
     juicer pre -a -o out_JBAT hic-to-contigs.bin scaffolds_final.agp contigs.fa.fai >out_JBAT.log 2>&1
     
@@ -90,7 +90,7 @@ Once completed editing, there should be a file named something like `out_JBAT.re
 
 This will end up with two files `out_JBAT.FINAL.agp` and `out_JBAT.FINAL.fa`. Together with `hic-to-contigs.bin` or the original BED/BAM file, you can regenerate a HiC contact map for the final assembly as described in the previous section.
 
-You can find more information about mannual editing with Juicebox here [Issue 4](https://github.com/c-zhou/yahs/issues/4).
+You can find more information about manual editing with Juicebox [here](https://www.dnazoo.org/methods) and [Issue 4](https://github.com/c-zhou/yahs/issues/4).
 
 ## Other tools
 * ***juicer*** is a tool used to quickly generate HiC alignment file required for HiC contact map generation with tools like [Juicebox](https://github.com/aidenlab/Juicebox), [PretextMap](https://github.com/wtsi-hpag/PretextMap) and [Higlass](https://github.com/higlass/higlass) (`juicer pre`). It can be also used to generate AGP and FASTA files after manual editing with Juicebox JBAT (`juicer post`).
