@@ -44,15 +44,23 @@ KHASH_SET_INIT_STR(str)
 
 static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
 {
+    int ret;
     FILE *fp;
     uint32_t i, i0, i1, m;
-    uint64_t p0, p1;
+    uint64_t p0, p1, pair_n, pair_c;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
-    long pair_c;
 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
+    
+    // check BIN file header consistency
+    if ((ret = file_sdict_match(f, sdict))) {
+        fprintf(stderr, "[E::%s] Not a valid BIN file or BIN file header does not match sequence dictionary: %d\n", __func__, ret);
+        fprintf(stderr, "[E::%s] Make sure no contig length threshold (YaHS option '-l') applied for the BIN file\n", __func__);
+        fprintf(stderr, "[E::%s] Consider using a BAM or BED file instead\n", __func__);
+        exit(EXIT_FAILURE);
+    }
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -65,12 +73,14 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
     pair_c = 0;
-    while (1) {
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
-        for (i = 0; i < m; i += 17) {
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
@@ -85,18 +95,10 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
                 else
                     fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
             }
-            
-            ++pair_c;
-        }
-
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 1;
-            break;
         }
     }
 
-    fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
+    fprintf(stderr, "[I::%s] %lu read pairs processed\n", __func__, pair_c);
     fclose(fp);
     asm_destroy(dict);
     sd_destroy(sdict);
@@ -112,10 +114,9 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     ssize_t read;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1;
-    uint64_t p0, p1;
+    uint64_t p0, p1, rec_c, pair_c;
     uint8_t q0, q1;
     int8_t buff;
-    long rec_c, pair_c;
     
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -139,7 +140,7 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     while ((read = getline(&line, &ln, fp)) != -1) {
     
         if (++rec_c % 1000000 == 0)
-              fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+              fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
         if (buff == 0) {
             sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
@@ -203,18 +204,6 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     return 0;
 }
 
-static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
-{
-    int i;
-    uint8_t c;
-    for (i = 0; i < n_cigar; ++i) {
-        c = cigar[i] & BAM_CIGAR_MASK;
-        if (c == BAM_CMATCH || c == BAM_CDEL)
-            s += cigar[i] >> BAM_CIGAR_SHIFT;
-    }
-    return s;
-}
-
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
@@ -226,7 +215,7 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
         *e = -1;
     } else {
         *s = b->core.pos + 1;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
+        *e = get_target_end(b) + 1;
     }
 
     return strdup(bam1_qname(b));
@@ -253,9 +242,8 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     char *cname0, *cname1, *rname0, *rname1;
     int32_t s0, s1, e0, e1;
     uint32_t i0, i1;
-    uint64_t p0, p1;
+    uint64_t p0, p1, rec_c, pair_c;
     int8_t buff;
-    long rec_c, pair_c;
     enum bam_sort_order so;
 
     khash_t(str) *hmseq; // for absent sequences
@@ -287,7 +275,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
         while (bam_read1(fp, b) >= 0 ) {
 
             if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if (buff == 0) {
                 rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &cname0);
@@ -351,7 +339,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
         while (bam_read1(fp, b) >= 0 ) {
             
             if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c); 
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c); 
             
             if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
                 continue;
@@ -382,7 +370,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
         }
     }
 
-    fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
+    fprintf(stderr, "[I::%s] %lu read pairs processed\n", __func__, pair_c);
 
     for (k = 0; k < kh_end(hmseq); ++k)
         if (kh_exist(hmseq, k))

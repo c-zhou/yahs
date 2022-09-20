@@ -80,9 +80,8 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     FILE *fp;
     uint32_t i, m, i0, i1, nb, *link_c;
     uint8_t buffer[BUFF_SIZE * 17];
-    uint64_t max_len, p0, p1;
+    uint64_t max_len, p0, p1, pair_n, pair_c, intra_c, cum_c;
     int64_t magic_number;
-    long pair_c, intra_c, cum_c;
 
     max_len = 0;
     for (i = 0; i < dict->n; ++i)
@@ -102,13 +101,14 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
-    pair_c = 0;
-    intra_c = 0;
-    while (1) {
+    pair_c = intra_c = 0;
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
-        for (i = 0; i < m; i += 17) {
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
@@ -119,14 +119,6 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
                 ++link_c[labs((long) p0 - p1) / resolution];
                 ++intra_c;
             }
-            
-            ++pair_c;
-        }
-
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 0;
-            break;
         }
     }
     
@@ -139,7 +131,7 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     free(link_c);
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %lu read pairs processed, intra links: %lu \n", __func__, pair_c, intra_c);
 #endif
     return i * resolution;
 }
@@ -188,10 +180,9 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
 {
     FILE *fp;
     uint32_t i, j, m, n, i0, i1;
-    uint64_t p0, p1;
+    uint64_t p0, p1, pair_n, pair_c, intra_c;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
-    long pair_c, intra_c;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -204,6 +195,8 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
     link_mat_t *link_mat = (link_mat_t *) malloc(sizeof(link_mat_t));
     link_mat->b = resolution;
@@ -217,10 +210,10 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     }
 
     pair_c = intra_c = 0;
-    while (1) {
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
-        for (i = 0; i < m; i += 17) {
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
@@ -234,20 +227,12 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
                 link_mat->link[i1].link[(MAX(p1, 1) - 1) / resolution] -= 1;
                 ++intra_c;
             }
-            
-            ++pair_c;
-        }
-        
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 0;
-            break;
         }
     }
     fclose(fp);
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, intra links: %ld \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %lu read pairs processed, intra links: %lu \n", __func__, pair_c, intra_c);
 #endif
     
     int64_t *link;

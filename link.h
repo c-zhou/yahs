@@ -35,6 +35,7 @@
 
 #include "sdict.h"
 #include "enzyme.h"
+#include "cov.h"
 
 #define SQRT2 1.41421356237
 #define SQRT2_2 .70710678118
@@ -85,15 +86,15 @@ typedef struct {
 extern "C" {
 #endif
 
-intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution);
-intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, uint32_t resolution);
-inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius);
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq, uint8_t mq);
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius, uint8_t mq);
+intra_link_mat_t *intra_link_mat_init(void *dict, uint32_t resolution, int use_gap_seq);
+inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uint32_t radius);
+intra_link_mat_t *intra_link_mat_from_file(const char *f, cov_norm_t *cov_norm, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq, uint8_t mq);
+inter_link_mat_t *inter_link_mat_from_file(const char *f, cov_norm_t *cov_norm, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius, uint8_t mq);
+cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict, uint32_t window);
 intra_link_t *get_intra_link(intra_link_mat_t *link_mat, uint32_t i, uint32_t j);
 inter_link_t *get_inter_link(inter_link_mat_t *link_mat, uint32_t i, uint32_t j);
 norm_t *calc_norms(intra_link_mat_t *link_mat);
-void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double *la);
+int inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double max_noise_ratio, double *la);
 void inter_link_weighted_norms(inter_link_mat_t *link_mat, norm_t *norm);
 void print_norms(FILE *fp, norm_t *norm);
 void print_intra_links(FILE *fp, intra_link_mat_t *link_mat, sdict_t *dict);
@@ -106,11 +107,10 @@ void norm_destroy(norm_t *norm);
 double *get_max_inter_norms(inter_link_mat_t *link_mat, asm_dict_t *dict);
 int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq);
 void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *dict, int8_t *directs);
-void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out);
-void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out);
+void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out);
+void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out);
+long estimate_intra_link_mat_init_rss(void *dict, uint32_t resolution, int use_gap_seq);
 long estimate_inter_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution, uint32_t radius);
-long estimate_intra_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution);
-long estimate_intra_link_mat_init_sdict_rss(sdict_t *dict, uint32_t resolution);
 #ifdef __cplusplus
 }
 #endif

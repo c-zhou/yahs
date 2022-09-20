@@ -155,13 +155,11 @@ void inter_link_mat_destroy(inter_link_mat_t *link_mat)
 //     O o o o # #
 //          b1
 // 
-inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius)
+inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, uint32_t resolution, uint32_t radius)
 {
     inter_link_mat_t *link_mat;
     inter_link_t *link;
-    uint32_t i, j, k, l, b0, b1, n, m, p, r2;
-    double a0, a1, a;
-    double **re_dens, re;
+    uint32_t i, j, k, b0, b1, n, m, p, r2;
 
     n = dict->n;
     m = (long) n * (n - 1) / 2;
@@ -171,8 +169,6 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
     link_mat->r = radius;
     link_mat->links = (inter_link_t *) malloc(m * sizeof(inter_link_t));
     
-    re_dens = calc_re_cuts_density2(re_cuts, resolution, dict);
-    
     for (i = 0; i < n; ++i) {
         if (dict->s[i].len < r2) {
             for (j = i + 1; j < n; ++j)
@@ -181,8 +177,6 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
         }
         
         b0 = MIN(radius, div_ceil(dict->s[i].len, r2));
-        // relative size of the last cell
-        a0 = MIN(1., (dict->s[i].len / 2. - (double) (b0 - 1) * resolution) / resolution);
         for (j = i + 1; j < n; ++j) {
             link = &link_mat->links[(long) (n * 2 - i - 3) * i / 2 + j - 1];
             if (dict->s[j].len < r2) {
@@ -191,8 +185,6 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
             }
             
             b1 = MIN(radius, div_ceil(dict->s[j].len, r2));
-            // relative size of the last cell
-            a1 = MIN(1., (dict->s[j].len / 2. - (double) (b1 - 1) * resolution) / resolution);
             p = b0 * b1; 
             link->c0 = i;
             link->c1 = j;
@@ -212,32 +204,8 @@ inter_link_mat_t *inter_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint
                 }
             }
 
-            // calculate relative areas for each cell 
-            for (l = 0; l < p; ++l) {
-                a = 1.;
-                if (l / b1 == b0 - 1)
-                    a *= a0;
-                if (l % b1 == b1 - 1)
-                    a *= a1;
-                if (a < .5)
-                    a = .0;
-                re = re_dens? re_dens[i][l / b1] * re_dens[j][l % b1] : 1.;
-                a *= re < MIN_RE_DENS? .0 : re;
-                if (a < FLT_EPSILON)
-                    a = FLT_EPSILON;
-                else if (a > 1.)
-                    a = -1. / a;
-                for (k = 0; k < 4; ++k)
-                    link->link[k][l] = a;
-            }
             memset(link->norms, 0, sizeof(link->norms));
         }
-    }
-
-    if (re_dens) {
-        for (i = 0; i < n; ++i)
-            free(re_dens[i]);
-        free(re_dens);
     }
 
     return link_mat;
@@ -290,230 +258,120 @@ long estimate_inter_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution, uin
 // 22 (0,4) 19 (1,4) 15 (2,4) 10 (3,4) 4  (4,4)
 // 25 (0,5) 23 (1,5) 20 (2,5) 16 (3,5) 11 (4,5) 5  (5,5)
 // 27 (0,6) 26 (1,6) 24 (2,6) 21 (3,6) 17 (4,6) 12 (5,6) 6  (6,6)
-intra_link_mat_t *intra_link_mat_init(asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution)
+intra_link_mat_t *intra_link_mat_init(void *dict, uint32_t resolution, int use_gap_seq)
 {
     intra_link_mat_t *link_mat;
     intra_link_t *link;
-    uint32_t i, j, k, n, b, p;
-    double a;
-    double **re_dens, *dens, re;
+    uint32_t i, n, b, p;
+    uint64_t len;
 
-    n = dict->n;
+    n = use_gap_seq? ((asm_dict_t *) dict)->n : ((sdict_t *) dict)->n;
     link_mat = (intra_link_mat_t *) malloc(sizeof(intra_link_mat_t));
     link_mat->n = n;
     link_mat->links = (intra_link_t *) calloc(n, sizeof(intra_link_t));
 
-    re_dens = calc_re_cuts_density1(re_cuts, resolution, dict);
-    
     for (i = 0; i < n; ++i) {
         link = &link_mat->links[i];
         link->c = i;
-        if (dict->s[i].len < resolution) {
+        len = use_gap_seq? ((asm_dict_t *) dict)->s[i].len : ((sdict_t *) dict)->s[i].len;
+        if (len < resolution) {
             link->n = 0;
             continue;
         }
-        b = div_ceil(dict->s[i].len, resolution);
+        b = div_ceil(len, resolution);
         link->n = b;
-        // relative size of the last cell
-        a = ((double) dict->s[i].len - (double) (b - 1) * resolution) / resolution;
         p = (long) b * (b + 1) / 2;
         link->link = (double *) calloc(p, sizeof(double));
         if (!link->link) {
             fprintf(stderr, "[E::%s] memory allocation failure\n", __func__);
             exit(EXIT_FAILURE);
         }
-        if (re_dens) {
-            dens = re_dens[i];
-            for (j = 0; j < b; ++j) {
-                for (k = j; k < b; ++k) {
-                    re = dens[j] * dens[k];
-                    link->link[(long) (b * 2 - k + j - 1) * (k - j) / 2 + k] = re < MIN_RE_DENS? .0 : re;
-                }
-            }
-        } else {
-            for (j = 0; j < p; ++j)
-                link->link[j] = 1.;
-        }
-        // calculate relative area for each cell
-        for (j = 0; j < b; ++j)
-            link->link[(long) (b + j) * (b - j - 1) / 2 + b - 1] *= (a < .5? .0 : a);
-        // the last cell in the diagonal
-        link->link[b - 1] *= (a < SQRT2_2? .0 : a);
-        for (j = 0; j < p; ++j) {
-            if (link->link[j] < FLT_EPSILON)
-                link->link[j] = FLT_EPSILON;
-            else if (link->link[j] > 1.)
-                link->link[j] = -1. / link->link[j];
-        }
-        // need a least half size to count
-        //for (j = 0; j < p; ++j)
-        //    if (link->link[j] < .5)
-        //        link->link[j] = -FLT_MAX;
+
 #ifdef DEBUG_INTRA
-        fprintf(stderr, "[DEBUG_INTRA::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
+        fprintf(stderr, "[DEBUG_INTRA::%s] %s bins: %d\n", __func__, use_gap_seq? ((asm_dict_t *) dict)->s[i].name : ((sdict_t *) dict)->s[i].name, link->n);
 #endif
     }
 
+    return link_mat;
+}
+
+long estimate_intra_link_mat_init_rss(void *dict, uint32_t resolution, int use_gap_seq)
+{
+    long bytes, p;
+    uint32_t i, n, b;
+    uint64_t len;
+
+    n = use_gap_seq? ((asm_dict_t *) dict)->n : ((sdict_t *) dict)->n;
+
+    bytes = 0;
+    bytes += sizeof(intra_link_mat_t);
+    bytes += n * sizeof(intra_link_t);
+
+    for (i = 0; i < n; ++i) {
+        len = use_gap_seq? ((asm_dict_t *) dict)->s[i].len : ((sdict_t *) dict)->s[i].len;
+        if (len < resolution)
+            continue;
+        b = div_ceil(len, resolution);
+        p = (long) b * (b + 1) / 2;
+        if (p > UINT32_MAX)
+            return -1;
+
+        bytes += p * sizeof(double);
+    }
+    return bytes;
+}
+
+static void intra_link_mat_normalise(intra_link_mat_t *link_mat, void *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq)
+{
+    intra_link_t *link;
+    uint32_t i, j, k, n, b;
+    uint64_t len;
+    double a, a0, a1, s;
+    double **re_dens;
+
+    n = use_gap_seq? ((asm_dict_t *) dict)->n : ((sdict_t *) dict)->n;
+
+    re_dens = use_gap_seq? calc_re_cuts_density1(re_cuts, resolution, dict) : calc_re_cuts_density(re_cuts, resolution);
+    
+    for (i = 0; i < n; ++i) {
+        len = use_gap_seq? ((asm_dict_t *) dict)->s[i].len : ((sdict_t *) dict)->s[i].len;
+        if (len < resolution) continue;
+        
+        link = &link_mat->links[i];
+        b = link->n;
+        // relative size of the last cell
+        a = ((double) len - (double) (b - 1) * resolution) / resolution;
+
+        for (j = 0; j < b; ++j) {
+            a0 = j < b-1? 1. : a;
+            for (k = j; k < b; ++k) {
+                a1 = k < b-1? 1. : a;
+                a1 *= a0;
+                a1 = a1 < .5? .0 : a1;
+                s = re_dens? re_dens[i][j] * re_dens[i][k] : 1.;
+                s = s < MIN_RE_DENS? .0 : s;
+                s *= a1;
+                if (s < FLT_EPSILON)
+                    link->link[(long) (b * 2 - k + j - 1) * (k - j) / 2 + k] = -DBL_MAX;
+                else
+                    link->link[(long) (b * 2 - k + j - 1) * (k - j) / 2 + k] /= s;
+            }
+        }
+    }
+    
     if (re_dens) {
         for (i = 0; i < n; ++i)
             free(re_dens[i]);
         free(re_dens);
     }
-    return link_mat;
 }
 
-long estimate_intra_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution)
+intra_link_mat_t *intra_link_mat_from_file(const char *f, cov_norm_t *cov_norm, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq, uint8_t mq)
 {
-    long bytes, p;
-    uint32_t i, n, b;
-
-    n = dict->n;
-    
-    bytes = 0;
-    bytes += sizeof(intra_link_mat_t);
-    bytes += n * sizeof(intra_link_t);
-
-    for (i = 0; i < n; ++i) {
-        if (dict->s[i].len < resolution)
-            continue;
-        b = div_ceil(dict->s[i].len, resolution);
-        p = (long) b * (b + 1) / 2;
-        if (p > UINT32_MAX)
-            return -1;
-
-        bytes += p * sizeof(double);
-    }
-    return bytes;
-}
-
-intra_link_mat_t *intra_link_mat_init_sdict(sdict_t *dict, re_cuts_t *re_cuts, uint32_t resolution)
-{
-    intra_link_mat_t *link_mat;
-    intra_link_t *link;
-    uint32_t i, j, k, n, b, p;
-    double a;
-    double **re_dens, *dens, re;
-    
-    n = dict->n;
-    link_mat = (intra_link_mat_t *) malloc(sizeof(intra_link_mat_t));
-    link_mat->n = n;
-    link_mat->links = (intra_link_t *) malloc(n * sizeof(intra_link_t));
-
-    re_dens = calc_re_cuts_density(re_cuts, resolution);
-
-    for (i = 0; i < n; ++i) {
-        link = &link_mat->links[i];
-        link->c = i;
-        if (dict->s[i].len < resolution) {
-            link->n = 0;
-            continue;
-        }
-        b = div_ceil(dict->s[i].len, resolution);
-        link->n = b;
-        // relative size of the last cell
-        a = ((double) dict->s[i].len - (double) (b - 1) * resolution) / resolution;
-        p = (long) b * (b + 1) / 2;
-        link->link = (double *) calloc(p, sizeof(double));
-        if (!link->link) {
-            fprintf(stderr, "[E::%s] memory allocation failure\n", __func__);
-            exit(EXIT_FAILURE);
-        }
-        if (re_dens) {
-            dens = re_dens[i];
-            for (j = 0; j < b; ++j) {
-                for (k = j; k < b; ++k) {
-                    re = dens[j] * dens[k];
-                    link->link[(long) (b * 2 - k + j - 1) * (k - j) / 2 + k] = re < MIN_RE_DENS? .0 : re;
-                }
-            }
-        } else {
-            for (j = 0; j < p; ++j)
-                link->link[j] = 1.;
-        }
-        // calculate relative area for each cell
-        for (j = 0; j < b; ++j)
-            link->link[(long) (b + j) * (b - j - 1) / 2 + b - 1] *= (a < .5? .0 : a);
-        // the last cell in the diagonal
-        link->link[b - 1] *= (a < SQRT2_2? .0 : a);
-        for (j = 0; j < p; ++j) {
-            if (link->link[j] < FLT_EPSILON)
-                link->link[j] = FLT_EPSILON;
-            else if (link->link[j] > 1.)
-                link->link[j] = -1. / link->link[j];
-        }
-        // need a least half size to count
-        //for (j = 0; j < p; ++j)
-        //    if (link->link[j] < .5)
-        //        link->link[j] = -FLT_MAX;
-#ifdef DEBUG_INTRA
-        fprintf(stderr, "[DEBUG_INTRA::%s] %s bins: %d\n", __func__, dict->s[i].name, link->n);
-#endif
-    }
-
-    return link_mat;
-}
-
-long estimate_intra_link_mat_init_sdict_rss(sdict_t *dict, uint32_t resolution)
-{
-    long bytes, p;
-    uint32_t i, n, b;
-
-    n = dict->n;
-    
-    bytes = 0;
-    bytes += sizeof(intra_link_mat_t);
-    bytes += n * sizeof(intra_link_t);
-
-    for (i = 0; i < n; ++i) {
-        if (dict->s[i].len < resolution)
-            continue;
-        b = div_ceil(dict->s[i].len, resolution);
-        p = (long) b * (b + 1) / 2;
-        if (p > UINT32_MAX)
-            return -1;
-
-        bytes += p * sizeof(double);
-    }
-    return bytes;
-}
-
-static inline int signf(double l) {
-    return (l > 0) - (l < 0);
-}
-
-static inline void normalise_by_size(double *l)
-{
-    int s;
-    s = signf(*l);
-    *l *= s;
-    double f, i;
-    // f is the decimal part, i.e., area * re
-    // i is the integer part, i.e., links
-    f = modf(*l, &i);
-    if (f < FLT_EPSILON) {
-        f = 1.;
-        i -= 1.;
-    }
-    assert(i >= 0 && f > 0);
-    // no normalisation for small cells to avoid extreme cases
-    if (fabs(f - FLT_EPSILON) < DBL_EPSILON) {
-        *l = -DBL_MAX;
-        return;
-    }
-    if (s > 0)
-        i /= f;
-    else
-        i *= f;
-    *l = i;
-}
-
-intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, int use_gap_seq, uint8_t mq)
-{
-    uint32_t i, j, k, m, n, i0, i1, b0, b1;
-    uint64_t p0, p1;
+    uint32_t i, k, m, i0, i1, b0, b1;
+    uint64_t p0, p1, pair_n, pair_c, intra_c;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
-    long pair_c, intra_c;
     intra_link_mat_t *link_mat;
     intra_link_t *link;
     FILE *fp;
@@ -527,16 +385,18 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
-    link_mat = use_gap_seq? intra_link_mat_init(dict, re_cuts, resolution) : intra_link_mat_init_sdict(dict->sdict, re_cuts, resolution);
+    link_mat = use_gap_seq? intra_link_mat_init(dict, resolution, use_gap_seq) : intra_link_mat_init(dict->sdict, resolution, use_gap_seq);
 
     pair_c = 0;
     intra_c = 0;
 
-    while (1) {
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
-        for (i = 0; i < m; i += 17) {
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
@@ -558,48 +418,90 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     if (b0 > b1)
                         SWAP(uint32_t, b0, b1);
                     k = (long) (link->n * 2 - b1 + b0 - 3) * (b1 - b0) / 2 + b1;
-                    link->link[k] += signf(link->link[k]);
+                    // link->link[k] += 1.;
+                    link->link[k] += cov_norm->norm[*(uint32_t *) (buffer + i)][(MAX(*(uint32_t *) (buffer + i + 4),  1) - 1) / cov_norm->w] *
+                        cov_norm->norm[*(uint32_t *) (buffer + i + 8)][(MAX(*(uint32_t *) (buffer + i + 12),  1) - 1) / cov_norm->w];
                 }
 
                 ++intra_c;
             }
-
-            ++pair_c;
-        }
-
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 0;
-            break;
         }
     }
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld intra links \n", __func__, pair_c, intra_c);
+    fprintf(stderr, "[DEBUG::%s] %lu read pairs processed, %lu intra links \n", __func__, pair_c, intra_c);
 #endif
     fclose(fp);
-
-    // normalise links by cell size
-    for (i = 0; i < link_mat->n; ++i) {
-        link = &link_mat->links[i];
-        n = link->n;
-        if (n == 0)
-            continue;
-        n = (long) n * (n + 1) / 2;
-        for (j = 0; j < n; ++j)
-            normalise_by_size(&link->link[j]);
-    }
+    
+    // TODO normalise links by cell size
+    if (use_gap_seq)
+        intra_link_mat_normalise(link_mat, dict, re_cuts, resolution, use_gap_seq);
+    else
+        intra_link_mat_normalise(link_mat, dict->sdict, re_cuts, resolution, use_gap_seq);
 
     return link_mat;
 }
 
-inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius, uint8_t mq)
+static void inter_link_mat_normalise(inter_link_mat_t *link_mat, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius)
+{
+    inter_link_t *link;
+    uint32_t i, j, k, l, b0, b1, n, p, r2;
+    double a0, a1, a;
+    double **re_dens, re;
+
+    n = dict->n;
+    r2 = resolution * 2;
+
+    re_dens = calc_re_cuts_density2(re_cuts, resolution, dict);
+
+    for (i = 0; i < n; ++i) {
+        if (dict->s[i].len < r2) continue;
+        
+        b0 = MIN(radius, div_ceil(dict->s[i].len, r2));
+        // relative size of the last cell
+        a0 = MIN(1., (dict->s[i].len / 2. - (double) (b0 - 1) * resolution) / resolution);
+        
+        for (j = i + 1; j < n; ++j) {
+            if (dict->s[j].len < r2) continue;
+            
+            b1 = MIN(radius, div_ceil(dict->s[j].len, r2));
+            // relative size of the last cell
+            a1 = MIN(1., (dict->s[j].len / 2. - (double) (b1 - 1) * resolution) / resolution);
+            
+            link = &link_mat->links[(long) (n * 2 - i - 3) * i / 2 + j - 1];
+            p = link->n;
+            // calculate relative areas for each cell
+            for (l = 0; l < p; ++l) {
+                a = 1.;
+                if (l / b1 == b0 - 1)
+                    a *= a0;
+                if (l % b1 == b1 - 1)
+                    a *= a1;
+                if (a < .5)
+                    a = .0;
+                re = re_dens? re_dens[i][l / b1] * re_dens[j][l % b1] : 1.;
+                a *= re < MIN_RE_DENS? .0 : re;
+                if (a < FLT_EPSILON)
+                    for (k = 0; k < 4; ++k) link->link[k][l] = -DBL_MAX;
+                else
+                    for (k = 0; k < 4; ++k) link->link[k][l] /= a;
+            }
+        }
+    }
+
+    if (re_dens) {
+        for (i = 0; i < n; ++i)
+            free(re_dens[i]);
+        free(re_dens);
+    }
+}
+
+inter_link_mat_t *inter_link_mat_from_file(const char *f, cov_norm_t *cov_norm, asm_dict_t *dict, re_cuts_t *re_cuts, uint32_t resolution, uint32_t radius, uint8_t mq)
 {
     uint32_t i, j, k, m, n, i0, i1, b0, b1;
-    uint64_t p0, p1;
+    uint64_t p0, p1, pair_n, pair_c, inter_c, radius_c, noise_c;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
-    double l0, l1, a, na[4], nc[4];
-    long pair_c, inter_c, radius_c, noise_c;
+    double l0, l1, c, a, na[4], nc[4];
     inter_link_mat_t *link_mat;
     inter_link_t *link;
     FILE *fp;
@@ -613,17 +515,17 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
     n = dict->n;
-    link_mat = inter_link_mat_init(dict, re_cuts, resolution, radius);
+    link_mat = inter_link_mat_init(dict, resolution, radius);
     pair_c = inter_c = radius_c = 0;
 
-    while (1) {
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
-        for (i = 0; i < m; i += 17) {
-            ++pair_c;
-
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
             
@@ -631,6 +533,9 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
             if (i0 != i1) {
+                c = cov_norm->norm[*(uint32_t *) (buffer + i)][(MAX(*(uint32_t *) (buffer + i + 4),  1) - 1) / cov_norm->w] *
+                    cov_norm->norm[*(uint32_t *) (buffer + i + 8)][(MAX(*(uint32_t *) (buffer + i + 12),  1) - 1) / cov_norm->w];
+
                 if (i0 > i1) {
                     SWAP(uint32_t, i0, i1);
                     SWAP(uint64_t, p0, p1);
@@ -650,7 +555,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     b1 = (uint32_t) ((double) p1 / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
                         k = (long) (MAX(1, b0) - 1) * link->b1 + b1;
-                        link->link[0][k] += signf(link->link[0][k]);
+                        // link->link[0][k] += 1.;
+                        link->link[0][k] += c;
                         ++radius_c;
                     }
                 } else if(p0 >= l0 && p1 >= l1) {
@@ -659,7 +565,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     b1 = (uint32_t) ((2 * l1 - p1) / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
                         k = (long) (MAX(1, b0) - 1) * link->b1 + b1;
-                        link->link[1][k] += signf(link->link[1][k]);
+                        // link->link[1][k] += 1.;
+                        link->link[1][k] += c;
                         ++radius_c;
                     }
                 } else if(p0 < l0 && p1 < l1) {
@@ -668,7 +575,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     b1 = (uint32_t) ((double) p1 / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
                         k = (long) (MAX(1, b0) - 1) * link->b1 + b1;
-                        link->link[2][k] += signf(link->link[2][k]);
+                        // link->link[2][k] += 1.;
+                        link->link[2][k] += c;
                         ++radius_c;
                     }
                 } else if(p0 < l0 && p1 >= l1) {
@@ -677,7 +585,8 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                     b1 = (uint32_t) ((2 * l1 - p1) / resolution);
                     if (b0 < link->b0 && b1 < link->b1 && b0 + b1 < radius) {
                         k = (long) (MAX(1, b0) - 1) * link->b1 + b1;
-                        link->link[3][k] += signf(link->link[3][k]);
+                        // link->link[3][k] += 1.;
+                        link->link[3][k] += c;
                         ++radius_c;
                     }
                 }
@@ -685,27 +594,16 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
                 ++inter_c;
             }
         }
-
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 0;
-            break;
-        }
     }
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
-    fprintf(stderr, "[DEBUG::%s] within radius %d: %ld\n", __func__, radius, radius_c);
+    fprintf(stderr, "[DEBUG::%s] %lu read pairs processed, %lu inter links \n", __func__, pair_c, inter_c);
+    fprintf(stderr, "[DEBUG::%s] within radius %d: %lu\n", __func__, radius, radius_c);
 #endif
     fclose(fp);
 
-    // normalise links by cell size
-    for (i = 0; i < link_mat->n; ++i) {
-        link = &link_mat->links[i];
-        for (j = 0; j < link->n; ++j)
-            for (k = 0; k < 4; ++k)
-                normalise_by_size(&link->link[k][j]);
-    }
+    // TODO normalise links by cell size
+    inter_link_mat_normalise(link_mat, dict, re_cuts, resolution, radius);
 
     // calculate noise level
     noise_c = a = 0;
@@ -731,10 +629,50 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, asm_dict_t *dict, re_c
     }
     link_mat->noise = a > 0? noise_c / a : 0;
 #ifdef DEBUG_NOISE
-    fprintf(stderr, "[DEBUG_NOISE::%s] noise links: %ld; area: %.12f; noise estimation: %.12f\n", __func__, noise_c, a, link_mat->noise);
+    fprintf(stderr, "[DEBUG_NOISE::%s] noise links: %lu; area: %.12f; noise estimation: %.12f\n", __func__, noise_c, a, link_mat->noise);
 #endif
 
     return link_mat;
+}
+
+cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict, uint32_t window)
+{
+    uint32_t i;
+    uint64_t m, n;
+    double *norm_a, **norm;
+    int64_t magic_number;
+    cov_norm_t *cov_norm;
+    FILE *fp;
+    
+    fp = fopen(f, "r");
+    if (fp == NULL)
+        return 0;
+
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) {
+        fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        return 0;
+    }
+    file_seek_skip_sdict(fp);
+    m = fread(&n, sizeof(uint64_t), 1, fp);
+    fseek(fp, n * 17, SEEK_CUR);
+    m = fread(&n, sizeof(uint64_t), 1, fp);
+    norm_a = (double *) malloc(sizeof(double) * n);
+    fread(norm_a, sizeof(double), n, fp);
+
+    norm = (double **) malloc(sizeof(double *) * dict->n);
+    norm[0] = norm_a;
+    for (i = 1; i < dict->n; ++i)
+        norm[i] = norm[i-1] + div_ceil(dict->s[i-1].len, window);
+    
+    fclose(fp);
+    
+    cov_norm = (cov_norm_t *) malloc(sizeof(cov_norm_t));
+    cov_norm->n = n;
+    cov_norm->w = window;
+    cov_norm->norm = norm;
+
+    return cov_norm;
 }
 
 void norm_destroy(norm_t *norm)
@@ -1004,7 +942,7 @@ int estimate_noise(inter_link_mat_t *link_mat)
     return n;
 }
 
-void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double *la)
+int inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double max_noise_ratio, double *la)
 {
     uint32_t i, j, k, b, b1, r, n, n0;
     uint32_t *fn;
@@ -1021,9 +959,17 @@ void inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimate
     }
 
     r = link_mat->r;
-    norms = (double *) malloc((r + 1) * sizeof(double));
-    for (i = 0; i <= r; ++i)
-        norms[i] = norm->norms[i] - noise;
+    norms = (double *) calloc(r + 1, sizeof(double));
+    for (i = 0; i <= r; ++i) {
+        if (norm->norms[i] * max_noise_ratio > noise) {
+            norms[i] = norm->norms[i] - noise;
+        } else {
+            fprintf(stderr, "[I::%s] using new radius %u (%u) as noise ratio exceeds threshold %.3f\n", __func__, i, r, max_noise_ratio);
+            r = i;
+            break;
+        }
+    }
+    if (r <= 1) return 1;
 
     /***
     // no weighting
@@ -1122,21 +1068,22 @@ loop_i_end:
         free(fn);
     }
     
-    *la = c0 / c;
+    *la = c == 0? .0 : c0 / c;
     fprintf(stderr, "[I::%s] average link count: %.3f %.3f %.3f\n", __func__, c0, c, *la);
     
     free(norms);
+
+    return 0;
 }
 
 int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
 {
     uint32_t i, j, k, m, n, na, i0, i1, b0, b1, b, ma, sma, n_ma;
-    uint64_t p0, p1;
+    uint64_t p0, p1, pair_n, pair_c, inter_c;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
     uint32_t *link, l;
     int8_t *directs;
-    long pair_c, inter_c;
     FILE *fp;
 
     fp = fopen(f, "r");
@@ -1148,16 +1095,18 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
+    file_seek_skip_sdict(fp);
+    m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
     n = dict->n;
     na = (long) n * (n - 1) / 2;
     link = (uint32_t *) calloc(na << 2, sizeof(uint32_t));
     pair_c = inter_c = 0;
 
-    while (1) {
+    while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
         
-        for (i = 0; i < m; i += 17) {
+        for (i = 0; i < m && pair_c < pair_n; i += 17, ++pair_c) {
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
@@ -1176,18 +1125,11 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
                 
                 ++inter_c;
             }
-
-            ++pair_c;
-        }
-        if (m < BUFF_SIZE * 17) {
-            if (ferror(fp))
-                return 0;
-            break;
         }
     }
 
 #ifdef DEBUG
-    fprintf(stderr, "[DEBUG::%s] %ld read pairs processed, %ld inter links \n", __func__, pair_c, inter_c);
+    fprintf(stderr, "[DEBUG::%s] %lu read pairs processed, %lu inter links \n", __func__, pair_c, inter_c);
 #endif
     fclose(fp);
     
@@ -1291,18 +1233,6 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
     }
 }
 
-static int32_t get_target_end(uint32_t *cigar, int n_cigar, int32_t s)
-{
-    int i;
-    uint8_t c;
-    for (i = 0; i < n_cigar; ++i) {
-        c = cigar[i] & BAM_CIGAR_MASK;
-        if (c == BAM_CMATCH || c == BAM_CDEL)
-            s += cigar[i] >> BAM_CIGAR_SHIFT;
-    }
-    return s;
-}
-
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, int32_t *e, uint8_t *q, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
@@ -1315,7 +1245,7 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, i
         *q = 0;
     } else {
         *s = b->core.pos + 1;
-        *e = get_target_end(bam1_cigar(b), b->core.n_cigar, b->core.pos) + 1;
+        *e = get_target_end(b) + 1;
         *q = b->core.qual;
     }
     
@@ -1335,7 +1265,7 @@ static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *
     return bam1_qname(b);
 }
 
-void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out)
+void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
 {
     bamFile fp;
     FILE *fo;
@@ -1346,7 +1276,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     uint32_t i0, i1, p0, p1;
     uint8_t q, q0, q1;
     int8_t buff;
-    long rec_c, pair_c, inter_c, intra_c;
+    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l;
     enum bam_sort_order so;
     
     khash_t(str) *hmseq; // for absent sequences
@@ -1368,6 +1298,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         exit(EXIT_FAILURE);
     }
     write_bin_header(fo);
+    sd_l = write_sequence_dictionary(fo, dict);
 
     h = bam_header_read(fp);
     b = bam_init1();
@@ -1379,12 +1310,14 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
 
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+
     if (so == ORDER_NAME) {
         // sorted by read names
         while (bam_read1(fp, b) >= 0 ) {
             
             if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if (buff == 0) {
                 rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &q0, &cname0);
@@ -1463,7 +1396,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         while (bam_read1(fp, b) >= 0) {
             
             if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
                 continue;
@@ -1517,14 +1450,26 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         free(rname1);
     bam_destroy1(b);
     bam_header_destroy(h);
-    sd_destroy(dict);
     bam_close(fp);
-    fclose(fo);
+    // write pair number
+    fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+    fseek(fo, pair_c * 17, SEEK_CUR);
 
-    fprintf(stderr, "[I::%s] dumped %ld read pairs from %ld records: %ld intra links + %ld inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
+    fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
+
+    cov_t *cov = bam_cstats(f, dict, 0);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
+    fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
+    cov_destroy(cov);
+    cov_norm_destroy(cov_norm);
+
+    sd_destroy(dict);
+    fclose(fo);
 }
 
-void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, const char *out)
+void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
 {
     FILE *fp, *fo;
     char *line = NULL;
@@ -1534,7 +1479,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     uint8_t q, q0, q1;
     int8_t buff;
-    long rec_c, pair_c, inter_c, intra_c;
+    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l;
 
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -1555,16 +1500,20 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
         exit(EXIT_FAILURE);
     }
     write_bin_header(fo);
+    sd_l = write_sequence_dictionary(fo, dict);
 
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = p0 = p1 = 0;
     q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
+    
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+
     while ((read = getline(&line, &ln, fp)) != -1) {
         
         if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %ld million records processed, %ld read pairs \n", __func__, rec_c / 1000000, pair_c);
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
         if (buff == 0) {
             sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
@@ -1630,10 +1579,22 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
     if (line)
         free(line);
-    sd_destroy(dict);
     fclose(fp);
-    fclose(fo);
+    // write pair number
+    fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+    fseek(fo, pair_c * 17, SEEK_CUR);
 
-    fprintf(stderr, "[I::%s] dumped %ld read pairs from %ld records: %ld intra links + %ld inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
+    fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
+
+    cov_t *cov = bed_cstats(f, dict);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
+    fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
+    cov_destroy(cov);
+    cov_norm_destroy(cov_norm);
+
+    sd_destroy(dict);
+    fclose(fo);
 }
 

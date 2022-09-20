@@ -4,10 +4,6 @@
 #include <stdint.h>
 #include <zlib.h>
 
-#ifdef USE_MALLOC_WRAPPERS
-#  include "malloc_wrap.h"
-#endif
-
 #define USE_VERBOSE_ZLIB_WRAPPERS
 
 typedef gzFile bamFile;
@@ -25,11 +21,11 @@ typedef gzFile bamFile;
 #endif /* USE_VERBOSE_ZLIB_WRAPPERS */
 
 typedef struct {
-	int32_t n_targets;
-	char **target_name;
-	uint32_t *target_len;
-	size_t l_text, n_text;
-	char *text;
+    int32_t n_targets;
+    char **target_name;
+    uint32_t *target_len;
+    size_t l_text, n_text;
+    char *text;
 } bam_header_t;
 
 #define BAM_FPAIRED        1
@@ -44,8 +40,16 @@ typedef struct {
 #define BAM_FQCFAIL      512
 #define BAM_FDUP        1024
 
+#define BAM_CIGAR_STR   "MIDNSHP=XB"
 #define BAM_CIGAR_SHIFT 4
 #define BAM_CIGAR_MASK  ((1 << BAM_CIGAR_SHIFT) - 1)
+#define BAM_CIGAR_TYPE  0x3C1A7
+
+#define bam_cigar_op(c) ((c)&BAM_CIGAR_MASK)
+#define bam_cigar_oplen(c) ((c)>>BAM_CIGAR_SHIFT)
+#define bam_cigar_opchr(c) (BAM_CIGAR_STR[bam_cigar_op(c)])
+#define bam_cigar_gen(l, o) ((l)<<BAM_CIGAR_SHIFT|(o))
+#define bam_cigar_type(o) (BAM_CIGAR_TYPE>>((o)<<1)&3) // bit 1: consume query; bit 2: consume reference
 
 #define BAM_CMATCH      0
 #define BAM_CINS        1
@@ -56,20 +60,20 @@ typedef struct {
 #define BAM_CPAD        6
 
 typedef struct {
-	int32_t tid;
-	int32_t pos;
-	uint32_t bin:16, qual:8, l_qname:8;
-	uint32_t flag:16, n_cigar:16;
-	int32_t l_qseq;
-	int32_t mtid;
-	int32_t mpos;
-	int32_t isize;
+    int32_t tid;
+    int32_t pos;
+    uint32_t bin:16, qual:8, l_qname:8;
+    uint32_t flag:16, n_cigar:16;
+    int32_t l_qseq;
+    int32_t mtid;
+    int32_t mpos;
+    int32_t isize;
 } bam1_core_t;
 
 typedef struct {
-	bam1_core_t core;
-	int l_aux, data_len, m_data;
-	uint8_t *data;
+    bam1_core_t core;
+    int l_aux, data_len, m_data;
+    uint8_t *data;
 } bam1_t;
 
 /*! Sort order parsed from @HD line */
@@ -95,9 +99,9 @@ enum bam_sort_order {
 #define bam1_aux(b) ((b)->data + (b)->core.n_cigar*4 + (b)->core.l_qname + (b)->core.l_qseq + ((b)->core.l_qseq + 1)/2)
 
 #define bam_init1() ((bam1_t*)calloc(1, sizeof(bam1_t)))
-#define bam_destroy1(b) do {					\
-		if (b) { free((b)->data); free(b); }	\
-	} while (0)
+#define bam_destroy1(b) do {                    \
+        if (b) { free((b)->data); free(b); }    \
+    } while (0)
 
 extern int bam_is_be;
 
@@ -105,17 +109,18 @@ extern int bam_is_be;
 extern "C" {
 #endif
 
-	bam_header_t *bam_header_init(void);
-	void bam_header_destroy(bam_header_t *header);
-	bam_header_t *bam_header_read(bamFile fp);
-	int bam_read1(bamFile fp, bam1_t *b);
+    bam_header_t *bam_header_init(void);
+    void bam_header_destroy(bam_header_t *header);
+    bam_header_t *bam_header_read(bamFile fp);
+    int bam_read1(bamFile fp, bam1_t *b);
     /*! Returns the sort order from the @HD SO: field */
     enum bam_sort_order bam_hrecs_sort_order(bam_header_t *header);
+    int get_target_end(bam1_t *b);
 
 #ifdef USE_VERBOSE_ZLIB_WRAPPERS
-	gzFile bamlite_gzopen(const char *fn, const char *mode);
-	int bamlite_gzread(gzFile file, void *ptr, unsigned int len);
-	int bamlite_gzclose(gzFile file);
+    gzFile bamlite_gzopen(const char *fn, const char *mode);
+    int bamlite_gzread(gzFile file, void *ptr, unsigned int len);
+    int bamlite_gzclose(gzFile file);
 #endif /* USE_VERBOSE_ZLIB_WRAPPERS */
 
 #ifdef __cplusplus

@@ -1,9 +1,30 @@
 #!/bin/bash
 
-out=yahs_test
-outdir="./outs/"
-contigs="./data/test.fa.gz" # need to be indexed, i.e., test.fa.gz.fai is available
-hicaln="./data/test.bed" # could be .bed, .bam or .bin file
+################################ START OF YAHS SCAFFOLDING TEST ################################
+#### download the test data
+## test is either "LYZE01" or "CHM13"
+test="LYZE01"
+#test="CHM13"
+wget https://zenodo.org/record/7079219/files/${test}.contigs.fasta.gz
+wget https://zenodo.org/record/7079219/files/${test}.contigs.fasta.gz.fai
+wget https://zenodo.org/record/7079219/files/${test}.hic.qn.bam
+
+out="test_out"
+outdir="."
+contigs="${test}.contigs.fasta.gz" # need to be indexed, i.e., test.fa.gz.fai is available
+hicaln="${test}.hic.qn.bam" # could be .bed, .bam or .bin file
+
+#### run yahs scaffolding
+../yahs -o ${outdir}/${out} ${contigs} ${hicaln} || exit 1
+## LYZE01 is a very small genome, 
+## better result when running YaHS with option "-r 1000,2000,5000,10000,20000,50000,100000,200000,500000"
+#../yahs -r 1000,2000,5000,10000,20000,50000,100000,200000,500000 -o ${outdir}/${out} ${contigs} ${hicaln} || exit 1
+################################# END OF YAHS SCAFFOLDING TEST #################################
+
+#### change doplot to 1 if you want to generate hic contact maps
+## you also need to set the path of juicer_tools, pretext_map, pretext_snapshot, and samtools
+doplot=0
+if [ ${doplot} -eq 0 ]; then exit 0; fi
 
 ## need juicer_tools/pretextmap and samtools if want to do hic plot
 ## juicer_tools: https://github.com/aidenlab/juicer/wiki/Download
@@ -15,18 +36,12 @@ hicaln="./data/test.bed" # could be .bed, .bam or .bin file
 ## see more information for juicer tools https://github.com/aidenlab/juicer/wiki/Juicer-Tools-Quick-Start
 ## output file will be ${outdir}/${out}.hic
 ## the output hic file could be viewed with JuiceBox https://github.com/aidenlab/Juicebox
-noplot=0
 #juicer_tools="java -Xmx32G -jar /bin/juicer_tools_1.22.01.jar pre --threads 12"
 ## v1.9.9 seems much faster than v1.22.01
 juicer_tools="java -Xmx32G -jar /bin/juicer_tools.1.9.9_jcuda.0.8.jar pre"
 pretext_map="/bin/PretextMap"
 pretext_snapshot="/bin/PretextSnapshot"
 samtools="/bin/samtools"
-
-#### run yahs scaffolding
-../yahs -o ${outdir}/${out} ${contigs} ${hicaln} >${outdir}/${out}.log 2>&1
-
-if [ ${noplot} -ne 0 ]; then exit 0; fi
 
 #### this is to generate input file for juicer_tools - non-assembly mode or for PretextMap
 ## here we use 8 CPUs and 32Gb memory for sorting - adjust it according to your device

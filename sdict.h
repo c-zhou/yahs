@@ -109,6 +109,9 @@ void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE
 void write_sorted_agp(asm_dict_t *dict, FILE *fo);
 void write_sdict_to_agp(sdict_t *sdict, char *out);
 void write_asm_dict_to_agp(asm_dict_t *dict, char *out);
+uint64_t write_sequence_dictionary(FILE *fo, sdict_t *dict);
+void file_seek_skip_sdict(FILE *fp);
+int file_sdict_match(char *f, sdict_t *dict);
 #ifdef __cplusplus
 }
 #endif

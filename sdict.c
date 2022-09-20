@@ -198,6 +198,17 @@ sdict_t *make_sdict_from_fa(const char *f, uint32_t min_len)
     return d;
 }
 
+static int is_empty_line(char *line)
+{
+    char *c;
+    c = line;
+    while (isspace((unsigned char) *c))
+        c++;
+    if(*c == 0)
+        return 1;
+    return 0;
+}
+
 sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
 {
     FILE *fp;
@@ -216,6 +227,8 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
     sdict_t *d;
     d = sd_init();
     while ((read = getline(&line, &ln, fp)) != -1) {
+        if (is_empty_line(line))
+            continue;
         sscanf(line, "%s %ld", name, &len);
         if (len > UINT32_MAX) {
             fprintf(stderr, "[E::%s] >4G sequence chunks are not supported: %s [%ld]\n", __func__, name, len);
@@ -246,6 +259,8 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
     sdict_t *d;
     d = sd_init();
     while ((read = getline(&line, &ln, fp)) != -1) {
+        if (is_empty_line(line))
+            continue;
         if (line[0] == 'S') {
             sscanf(line, "%*s %s %*s %s", name, lens);
             len = strtoul(lens + 5, NULL, 10);
@@ -390,6 +405,9 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     a = 0;
     s = n = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
+        if (is_empty_line(line) || !strncmp(line, "#", 1))
+            // header or empty lines
+            continue;
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
         if (!strncmp(type, "N", 1))
             continue;
@@ -594,17 +612,6 @@ char nucl_toupper[] = {
     'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N', 123, 124, 125, 126, 127
 };
 
-static int is_empty_line(char *line)
-{
-    char *c;
-    c = line;
-    while (isspace((unsigned char) *c))
-        c++;
-    if(*c == 0)
-        return 1;
-    return 0;
-}
-
 void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd, int un_oris)
 {
     FILE *agp_in;
@@ -789,5 +796,87 @@ void write_asm_dict_to_agp(asm_dict_t *dict, char *out)
     }
         
     fclose(agp_out);
+}
+
+uint64_t write_sequence_dictionary(FILE *fo, sdict_t *dict)
+{
+    uint32_t i;
+    uint64_t l;
+    // write number of sequences
+    fwrite(&dict->n, sizeof(uint32_t), 1, fo);
+    // write sequence lengths
+    for (i = 0; i < dict->n; ++i)
+        fwrite(&dict->s[i].len, sizeof(uint32_t), 1, fo);
+    l = dict->n;
+    for (i = 0; i < dict->n; ++i)
+        l += strlen(dict->s[i].name);
+    // write total length of sequence names
+    fwrite(&l, sizeof(uint64_t), 1, fo);
+    // write sequence name with a appending white space
+    const unsigned char space = ' ';
+    for (i = 0; i < dict->n; ++i) {
+        fwrite(dict->s[i].name, 1, strlen(dict->s[i].name), fo);
+        fwrite(&space, 1, 1, fo);
+    }
+
+    return sizeof(uint32_t) * (dict->n + 3) + l;
+}
+
+void file_seek_skip_sdict(FILE *fp)
+{
+    uint32_t n;
+    uint64_t l;
+    fread(&n, sizeof(uint32_t), 1, fp);
+    fseek(fp, sizeof(uint32_t) * n, SEEK_CUR);
+    fread(&l, sizeof(uint64_t), 1, fp);
+    fseek(fp, l, SEEK_CUR);
+}
+
+int file_sdict_match(char *f, sdict_t *dict)
+{
+    uint32_t i, m, n, s, *lens;
+    uint64_t l;
+    int64_t magic_number;
+    char *names, *p;
+    FILE *fp;
+
+    fp = fopen(f, "r");
+    if (fp == NULL)
+        return 1;
+
+    m = fread(&magic_number, sizeof(int64_t), 1, fp);
+    if (!m || !is_valid_bin_header(magic_number)) 
+        return 2;
+
+    fread(&n, sizeof(uint32_t), 1, fp);
+    if (n != dict->n)
+        return 3;
+    
+    lens = (uint32_t *) calloc(n, sizeof(uint32_t));
+    fread(lens, sizeof(uint32_t), n, fp);
+    for (i = 0; i < n; ++i) {
+        if (dict->s[i].len != lens[i]) {
+            free(lens);
+            return 4;
+        }
+    }
+    free(lens);
+    
+    fread(&l, sizeof(uint64_t), 1, fp);
+    names = (char *) calloc(l, 1);
+    m = fread(names, 1, l, fp);
+    for (p = names, i = 0; i < n; ++i) {
+        s = strlen(dict->s[i].name);
+        if (p - names >= l || strncmp(p, dict->s[i].name, s)) {
+            free(names);
+            return 5;
+        }
+        p += s + 1;
+    }
+    free(names);
+
+    fclose(fp);
+
+    return 0;
 }
 

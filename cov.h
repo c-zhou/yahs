@@ -1,7 +1,7 @@
 /*********************************************************************************
  * MIT License                                                                   *
  *                                                                               *
- * Copyright (c) 2021 Chenxi Zhou <chnx.zhou@gmail.com>                          *
+ * Copyright (c) 2022 Chenxi Zhou <chnx.zhou@gmail.com>                          *
  *                                                                               *
  * Permission is hereby granted, free of charge, to any person obtaining a copy  *
  * of this software and associated documentation files (the "Software"), to deal *
@@ -24,41 +24,51 @@
 
 /********************************** Revision History *****************************
  *                                                                               *
- * 02/09/21 - Chenxi Zhou: Created                                               *
+ * 02/09/22 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
-#ifndef ASSET_H_
-#define ASSET_H_
+#ifndef COV_H_
+#define COV_H_
 
 #include <stdint.h>
+#include <stdio.h>
 
-#define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define BUFF_SIZE 4096
-#define GAP_SZ 200
-#define BIN_H 0x5941485342494E56
-#define BIN_V 0x2
-#define LINK_EVIDENCE "proximity_ligation"
+#include "sdict.h"
+
+typedef struct {
+    size_t n, m;
+    // (uint64_t) pos << 32 | (uint32_t) count
+    // count can be negative
+    uint64_t *a;
+} pos_t;
+
+typedef struct {
+    uint32_t n; // seq number
+    pos_t *p;
+} cov_t;
+
+typedef struct {
+    uint64_t n; // total numbers
+    uint32_t w; // window size
+    double **norm;
+} cov_norm_t;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-double realtime(void);
-double cputime(void);
-void liftrlimit();
-long peakrss(void);
-void ram_limit(long *total, long *avail);
-int file_copy(char *fin, char *fout);
-int8_t is_read_pair(const char *rname0, const char *rname1);
-uint32_t div_ceil(uint64_t x, uint32_t y);
-uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g);
-void write_bin_header(FILE *fo);
-int is_valid_bin_header(int64_t magic_number);
+cov_t *cov_init(uint32_t n);
+void cov_destroy(cov_t *cov);
+void cov_norm_destroy(cov_norm_t *cov_norm);
+cov_t *bam_cstats(const char *bam, sdict_t *sdict, int match_header);
+cov_t *bed_cstats(const char *bed, sdict_t *sdict);
+double calc_avg_cov(cov_t *cov, sdict_t *sdict, double q_drop);
+cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q_drop);
+void print_cov_in_bed(cov_t *cov, sdict_t *sdict, FILE *fo);
+
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* ASSET_H_ */
+#endif /* COV_H_ */
 
