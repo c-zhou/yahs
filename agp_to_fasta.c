@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
     }
 
     if (argc - opt.ind < 2) {
-        fprintf(stderr, "[E::%s] missing input: three positional options required\n", __func__);
+        fprintf(stderr, "[E::%s] missing input: two positional options required\n", __func__);
         print_help(stderr);
         return 1;
     }

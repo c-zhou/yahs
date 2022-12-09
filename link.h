@@ -93,7 +93,7 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, cov_norm_t *cov_norm, 
 cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict, uint32_t window);
 intra_link_t *get_intra_link(intra_link_mat_t *link_mat, uint32_t i, uint32_t j);
 inter_link_t *get_inter_link(inter_link_mat_t *link_mat, uint32_t i, uint32_t j);
-norm_t *calc_norms(intra_link_mat_t *link_mat);
+norm_t *calc_norms(intra_link_mat_t *link_mat, uint32_t d_min_cell, double d_mass_frac);
 int inter_link_norms(inter_link_mat_t *link_mat, norm_t *norm, int use_estimated_noise, double max_noise_ratio, double *la);
 void inter_link_weighted_norms(inter_link_mat_t *link_mat, norm_t *norm);
 void print_norms(FILE *fp, norm_t *norm);

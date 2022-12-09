@@ -134,7 +134,7 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, long rss_limit, int no_mem_check)
+int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, uint32_t d_min_cell, double d_mass_frac, long rss_limit, int no_mem_check)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai, ml);
@@ -169,7 +169,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     fprintf(stderr, "[DEBUG_RAM_USAGE::%s] RAM  free: %.3fGB\n", __func__, (double) rss_limit / GB);
 #endif
 
-    norm_t *norm = calc_norms(intra_link_mat);
+    norm_t *norm = calc_norms(intra_link_mat, d_min_cell, d_mass_frac);
     if (norm == 0) {
         fprintf(stderr, "[W::%s] No enough bands for norm calculation... End of scaffolding round.\n", __func__);
         intra_link_mat_destroy(intra_link_mat);
@@ -384,7 +384,7 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 #endif
 }
 
-int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
+int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
 {
     int ec_round, re, r, rc;
     char *out_fn, *out_agp, *out_agp_break;
@@ -470,7 +470,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, rss_limit, no_mem_check);
+        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, d_min_cell, d_mass_frac, rss_limit, no_mem_check);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
@@ -590,27 +590,34 @@ static int default_nr(char *fai, uint32_t ml)
     return nr;
 }
 
-static void print_help(FILE *fp_help)
+static void print_help(FILE *fp_help, int is_long_help)
 {
     fprintf(fp_help, "Usage: yahs [options] <contigs.fa> <hic.bed>|<hic.bam>|<hic.bin>\n");
     fprintf(fp_help, "Options:\n");
-    fprintf(fp_help, "    -a FILE           AGP file (for rescaffolding) [none]\n");
-    fprintf(fp_help, "    -r INT[,INT,...]  list of resolutions in ascending order [automate]\n");
-    fprintf(fp_help, "    -e STR            restriction enzyme cutting sites [none]\n");
-    fprintf(fp_help, "    -l INT            minimum length of a contig to scaffold [0]\n");
-    fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
-    fprintf(fp_help, "    --no-contig-ec    do not do contig error correction\n");
-    fprintf(fp_help, "    --no-scaffold-ec  do not do scaffold error correction\n");
-    fprintf(fp_help, "    --no-mem-check    do not do memory check at runtime\n");
-    fprintf(fp_help, "    -o STR            prefix of output files [yahs.out]\n");
-    fprintf(fp_help, "    -v INT            verbose level [%d]\n", VERBOSE);
-    fprintf(fp_help, "    --version         show version number\n");
+    fprintf(fp_help, "    -a FILE                AGP file (for rescaffolding) [none]\n");
+    fprintf(fp_help, "    -r INT[,INT,...]       list of resolutions in ascending order [automate]\n");
+    fprintf(fp_help, "    -e STR                 restriction enzyme cutting sites [none]\n");
+    fprintf(fp_help, "    -l INT                 minimum length of a contig to scaffold [0]\n");
+    fprintf(fp_help, "    -q INT                 minimum mapping quality [10]\n");
+    if (is_long_help) {
+        fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
+        fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
+    }
+    fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
+    fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
+    fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
+    fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
+    fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
+    fprintf(fp_help, "    -?                     print long help with extra option list\n");
+    fprintf(fp_help, "    --version              show version number\n");
 }
 
 static ko_longopt_t long_options[] = {
     { "no-contig-ec",   ko_no_argument, 301 },
     { "no-scaffold-ec", ko_no_argument, 302 },
     { "no-mem-check",   ko_no_argument, 303 },
+    { "D-min-cells",    ko_required_argument, 304 },
+    { "D-mass-frac",    ko_required_argument, 305 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -621,7 +628,7 @@ typedef struct {size_t n, m; char **a;} cstr_v;
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
-        print_help(stderr);
+        print_help(stderr, 0);
         return 1;
     }
 
@@ -629,14 +636,14 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec, no_mem_check;
+    int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell;
     uint32_t wd;
-    double q_drop;
+    double q_drop, d_mass_frac;
 
     const char *opt_str = "a:e:r:o:l:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
 
-    int c, ret;
+    int c, ret, is_long_help;
     FILE *fp_help = stderr;
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
     no_contig_ec = no_scaffold_ec = no_mem_check = 0;
@@ -645,6 +652,9 @@ int main(int argc, char *argv[])
     ecstr = 0;
     wd = 1000;
     q_drop = 0.1;
+    d_min_cell = 30;
+    d_mass_frac = 0.99;
+    is_long_help = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'a') {
@@ -666,6 +676,10 @@ int main(int argc, char *argv[])
             no_scaffold_ec = 1;
         } else if (c == 303 ) {
             no_mem_check = 1;
+        } else if (c == 304 ) {
+            d_min_cell = atoi(opt.arg);
+        } else if (c == 305 ) {
+            d_mass_frac = atof(opt.arg);
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -674,8 +688,13 @@ int main(int argc, char *argv[])
         } else if (c == 'h') {
             fp_help = stdout;
         } else if (c == '?') {
-            fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
-            return 1;
+            if (argv[opt.i - 1][1] == '?') {
+                fp_help = stdout;
+                is_long_help = 1;
+            } else {
+                fprintf(stderr, "[E::%s] unknown option: \"%s\"\n", __func__, argv[opt.i - 1]);
+                return 1;
+            }
         } else if (c == ':') {
             fprintf(stderr, "[E::%s] missing option: \"%s\"\n", __func__, argv[opt.i - 1]);
             return 1;
@@ -683,13 +702,13 @@ int main(int argc, char *argv[])
     }
 
     if (fp_help == stdout) {
-        print_help(stdout);
+        print_help(stdout, is_long_help);
         return 0;
     }
 
     if (argc - opt.ind < 2) {
         fprintf(stderr, "[E::%s] missing input: two positional options required\n", __func__);
-        print_help(stderr);
+        print_help(stderr, is_long_help);
         return 1;
     }
 
@@ -701,6 +720,21 @@ int main(int argc, char *argv[])
     if (ml < 0) {
         fprintf(stderr, "[E::%s] invalid contig length threshold: %d\n", __func__, ml);
         return 1;
+    }
+
+    if (d_min_cell < 10) {
+        d_min_cell = 10;
+        fprintf(stderr, "[W::%s] using cell threshold for D: %d\n", __func__, d_min_cell);
+    }
+
+    if (d_mass_frac < 0.8) {
+        d_mass_frac = 0.8;
+        fprintf(stderr, "[W::%s] using mass fraction threshold for D: %.2f\n", __func__, d_mass_frac);
+    }
+
+    if (d_mass_frac > 1.0) {
+        d_mass_frac = 1.0;
+        fprintf(stderr, "[W::%s] using mass fraction threshold for D: %.2f\n", __func__, d_mass_frac);
     }
 
     uint8_t mq8;
@@ -834,11 +868,13 @@ int main(int argc, char *argv[])
     for (i = 0; i < nr; ++i)
         fprintf(stderr, "[DEBUG_OPTIONS::%s] nr=%d:  %d\n", __func__, i, resolutions[i]);
     fprintf(stderr, "[DEBUG_OPTIONS::%s] out:   %s\n", __func__, out);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] cellD: %d\n", __func__, d_min_cell);
+    fprintf(stderr, "[DEBUG_OPTIONS::%s] fracD: %d\n", __func__, d_mass_frac);
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[C]: %d\n", __func__, no_contig_ec);
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
-    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, re_cuts, no_contig_ec, no_scaffold_ec, no_mem_check);
+    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, re_cuts, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);

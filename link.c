@@ -692,7 +692,7 @@ int dcmp (const void *a, const void *b) {
     return cmp > 0? 1 : ( cmp < 0? -1 : 0);
 }
 
-norm_t *calc_norms(intra_link_mat_t *link_mat)
+norm_t *calc_norms(intra_link_mat_t *link_mat, uint32_t d_min_cell, double d_mass_frac)
 {
     uint32_t i, j, n, b, r, r0, t;
     uint32_t *bs;
@@ -720,7 +720,7 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
     }
 
     r0 = 0;
-    while (bs[r0] >= 30) 
+    while (bs[r0] >= d_min_cell)
         ++r0;
     if (r0 < 10) {
         fprintf(stderr, "[E::%s] no enough bands (%d) for norm calculation, try a higher resolution\n", __func__, r0);
@@ -764,7 +764,7 @@ norm_t *calc_norms(intra_link_mat_t *link_mat)
     tmp_c = .0;
     for (r = 1; r < n; ++r) {
         tmp_c += linkc[r];
-        if (tmp_c / intra_c >= .99)
+        if (tmp_c / intra_c >= d_mass_frac)
             break;
     }
     

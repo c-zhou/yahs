@@ -11,7 +11,7 @@ wget https://zenodo.org/record/7079219/files/${test}.hic.qn.bam
 
 out="test_out"
 outdir="."
-contigs="${test}.contigs.fasta.gz" # need to be indexed, i.e., test.fa.gz.fai is available
+contigs="${test}.contigs.fasta.gz" # need to be indexed, i.e., ${test}.contigs.fasta.gz.fai is presented
 hicaln="${test}.hic.qn.bam" # could be .bed, .bam or .bin file
 
 #### run yahs scaffolding

@@ -237,6 +237,8 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
         if (len >= min_len)
             sd_put(d, name, len);
     }
+    if (line)
+        free(line);
     fclose(fp);
     return d;
 }
@@ -272,6 +274,8 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
                 sd_put(d, name, len);
         }
     }
+    if (line)
+        free(line);
     fclose(fp);
 
     return d;
@@ -533,7 +537,7 @@ int cmp_uint64_d (const void *a, const void *b) {
     uint64_t x, y;
     x = *(uint64_t *) a;
     y = *(uint64_t *) b;
-    return x == y? 0 : (x < y? 1 : -1);
+    return (x < y) - (x > y);
 }
 
 static void nl_stats(uint64_t *s, uint32_t n, uint64_t *n_stats, uint32_t *l_stats)
@@ -708,6 +712,8 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     fprintf(stderr, "[I::%s] Number sequences: %ld\n", __func__, ns);
     fprintf(stderr, "[I::%s] Number bases: %ld\n", __func__, L);
 
+    if (line)
+        free(line);
     free(name);
     free(dict);
 

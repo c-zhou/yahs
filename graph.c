@@ -175,6 +175,8 @@ graph_t *read_graph_from_gfa(char *gfa)
             graph_add_arc(g, (asm_sd_get(g->sdict, c0)<<1) | (s0[0]=='-'), (asm_sd_get(g->sdict, c1)<<1) | (s1[0]=='-'), -1, 0, wt);
         }
     }
+    if (line)
+        free(line);
     fclose(fp);
 
     graph_arc_sort(g);

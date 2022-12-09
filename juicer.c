@@ -427,6 +427,8 @@ static uint64_t assembly_annotation(const char *f, const char *out_agp, const ch
         fprintf(fo_agp, "assembly\t%lu\t%lu\t%u\tW\t%s\t%s\t%s\t%s\n", genome_size + 1, genome_size + l, ++c, cname, cstarts, cends, oris);
         genome_size += l;
     }
+    if (line)
+        free(line);
     fclose(fp);
 
     scaled_gs = linear_scale(genome_size, scale, max_s);
@@ -766,6 +768,8 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
         }
     }
     
+    if (line)
+        free(line);
     fclose(fp);
 
     asm_destroy(dict);
