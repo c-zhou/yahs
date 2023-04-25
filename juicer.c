@@ -47,7 +47,7 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
     int ret;
     FILE *fp;
     uint32_t i, i0, i1, m;
-    uint64_t p0, p1, pair_n, pair_c;
+    uint64_t p0, p1, pair_n, pair_c, pair_u;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
 
@@ -76,7 +76,7 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
 
-    pair_c = 0;
+    pair_c = pair_u = 0;
     while (pair_c < pair_n) {
         m = fread(buffer, sizeof(uint8_t), BUFF_SIZE * 17, fp);
 
@@ -88,7 +88,8 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, count_gap);
             
             if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
-                fprintf(stderr, "[W::%s] sequence not found \n", __func__);
+                // fprintf(stderr, "[W::%s] sequence not found \n", __func__);
+                ++pair_u;
             } else {
                 if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
                     fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
@@ -98,7 +99,7 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
         }
     }
 
-    fprintf(stderr, "[I::%s] %lu read pairs processed\n", __func__, pair_c);
+    fprintf(stderr, "[I::%s] %lu read pairs processed: %lu unmapped\n", __func__, pair_c, pair_u);
     fclose(fp);
     asm_destroy(dict);
     sd_destroy(sdict);

@@ -373,7 +373,8 @@ void asm_index(asm_dict_t *d)
         free(d->index);
     d->index = (uint64_t *) malloc(s * sizeof(uint64_t));
     a = d->a;
-    c1 = INT32_MAX;
+    memset(a, 0xff, sizeof(uint32_t) * d->sdict->n);
+    c1 = UINT32_MAX;
     for (i = 0; i < s; ++i) {
         d->index[i] = c_pairs[i].y;
         c = c_pairs[i].x >> 32;
@@ -478,20 +479,29 @@ void add_unplaced_short_seqs(asm_dict_t *d, uint32_t min_len)
 // one-based
 int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap)
 {
-    if (id == UINT32_MAX) {
-        *s = UINT32_MAX;
+    *s = UINT32_MAX;
+    *p = UINT64_MAX;
+
+    if (id == UINT32_MAX)
         return 1;
-    }
+
     uint32_t i;
     uint64_t *index = d->index;
     i = d->a[id];
+    if (i == UINT32_MAX)
+        return 1;
+
     while (index[i]>>32 < pos) 
         ++i;
     sd_seg_t seg = d->seg[(uint32_t) index[i]];
+    if (pos < seg.x)
+        return 1;
+
     *s = seg.s;
     *p = seg.c & 1? seg.a + seg.x + seg.y - pos + 1 : seg.a + pos - seg.x;
     if (count_gap)
         *p = *p + seg.k * GAP_SZ;
+
     return 0;
 }
 
@@ -499,10 +509,11 @@ int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t 
 // one-based
 int sd_coordinate_rev_conversion(asm_dict_t *d, uint32_t id, uint64_t pos, uint32_t *s, uint32_t *p, int count_gap)
 {
-    if (id == UINT32_MAX) {
-        *s = UINT32_MAX;
+    *s = UINT32_MAX;
+    *p = UINT32_MAX;
+
+    if (id == UINT32_MAX)
         return 1;    
-    }
 
     sd_seg_t *seg = d->seg + d->s[id].s;
     uint32_t n = d->s[id].n;
@@ -520,10 +531,8 @@ int sd_coordinate_rev_conversion(asm_dict_t *d, uint32_t id, uint64_t pos, uint3
         }
     }
     
-    if (l > 0 || in_gap) {
-        *s = UINT32_MAX;
+    if (l > 0 || in_gap)
         return 1;
-    }
 
     --i;
     *s = seg[i].c >> 1;
