@@ -1,3 +1,4 @@
+/*  Last edited: May 18 15:36 2023 (rd109) */
 /*********************************************************************************
  * MIT License                                                                   *
  *                                                                               *
@@ -895,3 +896,160 @@ int file_sdict_match(char *f, sdict_t *dict)
     return 0;
 }
 
+/*************** extra code to write into ONEcode GFA format file **************/
+
+static char *gfaSchemaText ; // at end of file
+
+#include "ONElib.h"
+#include "kvec.h"
+
+void write_asm_dict_to_ONEgfa (asm_dict_t *dict, char *outPrefix)
+{
+    uint64_t len = 0;
+    sd_seg_t seg, lastseg;
+    uint32_t i, j, n, s, t;
+    OneSchema *schema = oneSchemaCreateFromText (gfaSchemaText) ;
+    char buf[4096] ; // for file and objectnames
+    kvec_t(uint64_t) segList ;
+    kvec_t(char) directionList ;
+
+#define BADFILE { \
+      fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, buf) ; \
+      exit(EXIT_FAILURE); \
+    }
+    
+    strcpy (buf, outPrefix) ; strcat (buf, ".1seg") ;
+    OneFile *ofseg = oneFileOpenWriteNew (buf, schema, "seg", true, 1) ;
+    if (!ofseg) BADFILE ;
+    strcpy (buf, outPrefix) ; strcat (buf, ".1link") ;
+    OneFile *oflink = oneFileOpenWriteNew (buf, schema, "link", false, 1) ;
+    if (!oflink) BADFILE ;
+    strcpy (buf, outPrefix) ; strcat (buf, ".1path") ;
+    OneFile *ofpath = oneFileOpenWriteNew (buf, schema, "path", true, 1) ;
+    if (!ofpath) BADFILE ;
+    strcpy (buf, outPrefix) ; strcat (buf, ".1segseq") ;
+    OneFile *ofseq = oneFileOpenWriteNew (buf, schema, "segseq", true, 1) ;
+    if (!ofpath) BADFILE ;
+
+    fprintf (stderr, "entering one write\n") ;
+    
+    kv_init(segList) ;
+    kv_init(directionList) ;
+    for (i = 0; i < dict->n; ++i) {
+        len = 0;
+        t = 0;
+        s = dict->s[i].s;
+        n = dict->s[i].n;
+	segList.n = 0 ;
+	directionList.n = 0 ;
+        for (j = 0; j < n; ++j) {
+            seg = dict->seg[s + j];
+	    // write the segment object
+	    oneInt(ofseg,0) = seg.y ;
+	    oneWriteLine (ofseg, 'S', 0, 0) ;
+	    sprintf (buf, "%s_%u_%u", dict->sdict->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y) ;
+	    oneWriteLine (ofseg, 'I', strlen(buf), buf) ;
+	    uint32_t seqid = sd_get(dict->sdict,dict->sdict->s[seg.c >> 1].name) ;
+	    if (dict->sdict->s[seqid].seq)
+	      oneWriteLine (ofseq, 'D', seg.y, dict->sdict->s[seqid].seq + seg.x) ;
+	    if (j > 0) {	    // write the link object
+	      oneInt(oflink,0) = ofseg->object-1 ;
+	      oneChar(oflink, 1) = "+-"[lastseg.c & 1] ;
+	      oneInt(oflink, 2) = ofseg->object ;
+	      oneChar(oflink, 3) = "+-"[seg.c & 1] ;
+	      oneWriteLine (oflink, 'L', 0, 0) ;
+	      oneInt(oflink, 0) = GAP_SZ ;
+	      oneWriteLine (oflink, 'J', 0, 0) ; // contigs are separated by gaps, here JUMPs
+	    }
+	    kv_push(uint64_t,segList,ofseg->object) ;
+	    kv_push(char,directionList,"+-"[seg.c & 1]) ;
+	    lastseg = seg ;
+	}
+	oneWriteLine (ofpath, 'P', n, segList.a) ;
+	oneWriteLine (ofpath, 'D', n, directionList.a) ;
+	oneWriteLine (ofpath, 'I', strlen(dict->s[i].name), dict->s[i].name) ;
+    }
+    kv_destroy(segList) ;
+    kv_destroy(directionList) ;
+    oneFileClose (ofseg) ;
+    oneFileClose (oflink) ;
+    oneFileClose (ofpath) ;
+    oneFileClose (ofseq) ;
+
+    fprintf (stderr, "leaving ONE write\n") ;
+}
+
+/*******************************************************/
+
+static char *gfaSchemaText =
+  "1 3 def 1 0   schema for GFA\n"
+  ".\n"
+  ". checked 18/5/2023 with GFA1 spec at https://github.com/GFA-spec/GFA-spec/blob/master/GFA1.md\n"
+  ". segments don't need to have explicit sequences - so we make them their own class\n"
+  ". if segment sequences are available use the sgs subtype of seq\n" 
+  ".\n"
+  "P 3 seg                 SEGMENT\n"
+  "O S 1 3 INT             length\n"
+  "D I 1 6 STRING          identifier - required by GFA\n"
+  "D R 1 3 INT             RC read count\n"
+  "D F 1 3 INT             FC fragment count\n"
+  "D K 1 3 INT             KC k-mer count\n"
+  "D H 1 6 STRING          SH checksum in hex\n"
+  "D U 1 6 STRING          UR URL for sequence\n"
+  ".\n"
+  "P 3 seq                 SEQUENCE\n"
+  "S 6 segseq              segment sequences - objects are 1:1 with those in seg file\n"
+  "S 7 readseq             read sequences\n"
+  "O S 1 3 DNA             sequence: the DNA string\n"
+  "D I 1 6 STRING          id - sequence identifier; unnecessary for segments\n"
+  "D Q 1 6 STRING          base quality - Q values (ascii string = q+33)\n"
+  "D P 1 6 STRING          kmer ploidy estimates - '0' for error, '1','2'..'8' for ploidy, '*' for repeat\n"
+  ".\n"
+  "P 4 link                            LINK (default, or a JUMP if J is present)\n"
+  "O L 4 3 INT 4 CHAR 3 INT 4 CHAR     s1 dir1 s2 dir2 - s1,2 are indices in seg file, dir='+'|'-'\n"
+  "D O 1 3 INT                         overlap - else presume abut\n"
+  "D J 1 3 INT                         a JUMP not a link - int is the gap, 0 if unknown (GFA '*'), -ve for possible overlap\n"
+  "D G 1 6 STRING                      cigar string - else presume exact (only meaningful if overlapping)\n"
+  "D Q 1 3 INT                         MQ mapping quality\n"
+  "D M 1 3 INT                         NM number of mismatches\n"
+  "D R 1 3 INT                         RC read count\n"
+  "D F 1 3 INT                         FC fragment count\n"
+  "D K 1 3 INT                         KC k-mer count\n"
+  "D I 1 6 STRING                      ID edge identifier (deprecated)\n"
+  "D C 0                               SC if present then a shortcut - see spec - used for scaffolds\n"
+  ".\n"
+  "P 4 path                PATH\n"
+  "O P 1 8 INT_LIST        list of segments\n"
+  "D D 1 6 STRING          list of directions of each segment (+ or -) - required\n"
+  "D I 1 6 STRING          path identifier (required by GFA) - optional here\n"
+  "D G 1 11 STRING_LIST    list of cigar strings for overlaps - optional/deprecated\n"
+  "D S 1 3 INT             start in first segment - defaults to 0 if missing - not in GFA\n"
+  "D E 1 3 INT             end distance from end of last segment - defaults to 0 if missing - not in GFA\n"
+  ".\n"
+  "P 4 walk                WALK - in GFA 1.1 only - requires non-overlapping segments\n"
+  "O W 2 3 INT 8 INT_LIST  length, list of segments\n"
+  "D D 1 6 STRING          list of directions of each segment (+ or -) - required\n"
+  "D I 1 6 STRING          identifier (required by GFA)\n"
+  "D J 1 6 STRING          sample identifier (required by GFA)\n"
+  "D H 1 3 INT             haplotype : 1..<ploidy> - missing if 0 in GFA = haploid or unknown\n"
+  "D S 1 3 INT             start in first segment - defaults to 0 if missing\n"
+  "D E 1 3 INT             end distance from end of last segment - defaults to 0 if missing\n"
+  ".\n"
+  "P 7 contain                              CONTAINMENT - contained and container are both segs\n"
+  "O L 5 3 INT 4 CHAR 3 INT 4 CHAR 3 INT    s1 dir1 s2 dir2 pos - s1,2 in seg file dir=+|- start position\n"
+  "D G 1 6 STRING                           cigar string - else presume exact match\n"
+  "D I 1 6 STRING                           ID edge identifier (deprecated)\n"
+  "D R 1 3 INT                              RC read count\n"
+  "D M 1 3 INT                              NM number of mismatches\n"
+  ".\n"
+  "P 5 align               ALIGNMENT - of sequences from a sequence file, e.g. reads\n"
+  "O A 2 3 INT 8 INT_LIST  index of seq to align, list of segments as in WALK\n"
+  "D D 1 6 STRING          list of directions of each segment (+ or -) - required\n"
+  "D S 1 3 INT             start - as in WALK\n"
+  "D E 1 3 INT             end - as in WALK\n"
+  "D G 1 6 STRING          cigar string - for mapping\n"
+  "D Q 1 3 INT             mapping quality\n"
+  "D M 1 3 INT             number of mismatches\n"
+  ".\n" ;
+
+/******************* end of file *******************/

@@ -1,3 +1,4 @@
+/*  Last edited: May 18 14:51 2023 (rd109) */
 /*********************************************************************************
  * MIT License                                                                   *
  *                                                                               *
@@ -384,6 +385,9 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 #endif
 }
 
+// forward declaration of function at end of file
+void write_asm_dict_to_ONEgfa (asm_dict_t *dict, char *outPrefix) ;
+
 int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
 {
     int ec_round, re, r, rc;
@@ -533,6 +537,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
         fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out_agp);
         exit(EXIT_FAILURE);
     }
+    write_asm_dict_to_ONEgfa (dict, out) ;
     write_sorted_agp(dict, fo);
     fclose(fo);
     
