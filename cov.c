@@ -38,6 +38,9 @@
 #include "cov.h"
 #include "asset.h"
 
+void *kopen(const char *fn, int *_fd);
+int kclose(void *a);
+
 KHASH_SET_INIT_STR(str)
 
 // read unmapped (0x4)
@@ -105,7 +108,7 @@ static int u64_cmpfunc (const void *a, const void *b)
     return (*(uint64_t *) a > *(uint64_t *) b) - (*(uint64_t *) a < *(uint64_t *) b);
 }
 
-static uint64_t pos_compression(cov_t *cov)
+uint64_t pos_compression(cov_t *cov)
 {
     uint32_t i, p, p1;
     int32_t c;
@@ -237,6 +240,8 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     size_t ln = 0;
     ssize_t read;
     FILE *fp;
+    int fd;
+    void *fh;
     cov_t *covs;
     
     khash_t(str) *hmseq; // for absent sequences
@@ -244,7 +249,8 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     int absent;
     hmseq = kh_init(str);
 
-    fp = fopen(bed, "r");
+    fh = kopen(bed, &fd);
+    fp = fdopen(fd, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, bed);
         exit(EXIT_FAILURE);
@@ -295,6 +301,7 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     if (line)
         free(line);
     fclose(fp);
+    kclose(fh);
 
     return covs;
 }

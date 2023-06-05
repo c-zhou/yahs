@@ -60,6 +60,7 @@ extern "C" {
 cov_t *cov_init(uint32_t n);
 void cov_destroy(cov_t *cov);
 void cov_norm_destroy(cov_norm_t *cov_norm);
+uint64_t pos_compression(cov_t *cov);
 cov_t *bam_cstats(const char *bam, sdict_t *sdict, int match_header);
 cov_t *bed_cstats(const char *bed, sdict_t *sdict);
 double calc_avg_cov(cov_t *cov, sdict_t *sdict, double q_drop);

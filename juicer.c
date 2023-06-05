@@ -35,10 +35,14 @@
 #include "ketopt.h"
 #include "sdict.h"
 #include "asset.h"
-
-#define JUICER_VERSION "1.1"
+#include "version.h"
 
 static double jc_realtime0;
+
+enum fileTypes{NOSET, BED, BAM, BIN};
+
+void *kopen(const char *fn, int *_fd);
+int kclose(void *a);
 
 KHASH_SET_INIT_STR(str)
 
@@ -110,6 +114,8 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
 static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
 {
     FILE *fp;
+    int fd;
+    void *fh;
     char *line = NULL;
     size_t ln = 0;
     ssize_t read;
@@ -127,7 +133,8 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
 
-    fp = fopen(f, "r");
+    fh = kopen(f, &fd);
+    fp = fdopen(fd, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -199,6 +206,7 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     if (line)
         free(line);
     fclose(fp);
+    kclose(fh);
     asm_destroy(dict);
     sd_destroy(sdict);
 
@@ -222,17 +230,17 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
     return strdup(bam1_qname(b));
 }
 
-static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
+static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
 {
     // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
     if (b->core.flag & 0xF4C)
-        return 0;
+        return -1;
     *cname0 = h->target_name[b->core.tid];
     *s0 = b->core.pos + 1;
     *cname1 = h->target_name[b->core.mtid];
     *s1 = b->core.mpos + 1;
 
-    return bam1_qname(b);
+    return 0;
 }
 
 static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
@@ -342,7 +350,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c); 
             
-            if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
+            if(parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1) < 0)
                 continue;
 
             sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
@@ -511,10 +519,12 @@ static void print_help_pre(FILE *fp_help)
     fprintf(fp_help, "    -a                preprocess for assembly mode\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for '-a' mode) [stdout]\n");
+    fprintf(fp_help, "    --file-type STR   input file type BED|BAM|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    --version         show version number\n");
 }
 
 static ko_longopt_t long_options[] = {
+    { "file-type",      ko_required_argument, 301 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -525,7 +535,8 @@ static int main_pre(int argc, char *argv[])
     FILE *fo;
     char *fai, *agp, *agp1, *link_file, *out, *out1, *annot, *lift, *ext;
     int mq, asm_mode;;
-    
+    enum fileTypes f_type;
+
     liftrlimit();
     jc_realtime0 = realtime();
 
@@ -536,6 +547,7 @@ static int main_pre(int argc, char *argv[])
     fai = agp = agp1 = link_file = out = out1 = annot = lift = 0;
     mq = 10;
     asm_mode = 0;
+    f_type = NOSET;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'o') {
@@ -544,6 +556,17 @@ static int main_pre(int argc, char *argv[])
             mq = atoi(opt.arg);
         } else if (c == 'a') {
             asm_mode = 1;
+        } else if (c == 301) {
+            if (strcasecmp(opt.arg, "BED") == 0)
+                f_type = BED;
+            else if (strcasecmp(opt.arg, "BAM") == 0)
+                f_type = BAM;
+            else if (strcasecmp(opt.arg, "BIN") == 0)
+                f_type = BIN;
+            else {
+                fprintf(stderr, "[E::%s] unknown file type: \"%s\"\n", __func__, opt.arg);
+                return 1;
+            }
         } else if (c == 'h') {
             fp_help = stdout;   
         } else if (c == 'V') {
@@ -586,6 +609,22 @@ static int main_pre(int argc, char *argv[])
     agp = argv[opt.ind + 1];
     fai = argv[opt.ind + 2];
 
+    if (f_type == NOSET) {
+        ext = link_file + strlen(link_file) - 4;
+        if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
+        else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
+        else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
+        else {
+            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin or --file-type is expected\n", __func__);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (f_type == BIN && (*link_file == '-' || *link_file == '<')) {
+        fprintf(stderr, "[E::%s] BIN file format from STDIN is not supported\n", __func__);
+        exit(EXIT_FAILURE);
+    }
+
     if (out) {
         out1 = (char *) malloc(strlen(out) + 35);
         sprintf(out1, "%s.txt", out);
@@ -621,19 +660,15 @@ static int main_pre(int argc, char *argv[])
         scaled_s = assembly_scale_max_seq(dict, &scale, (uint64_t) INT_MAX, &max_s);
     }
 
-    ext = link_file + strlen(link_file) - 4;
-    if (strcmp(ext, ".bam") == 0) {
+    if (f_type == BAM) {
         fprintf(stderr, "[I::%s] make juicer pre input from BAM file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bam(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
-    } else if (strcmp(ext, ".bed") == 0) {
+    } else if (f_type == BED) {
         fprintf(stderr, "[I::%s] make juicer pre input from BED file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bed(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
-    } else if (strcmp(ext, ".bin") == 0) {
+    } else if (f_type == BIN) {
         fprintf(stderr, "[I::%s] make juicer pre input from BIN file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bin(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
-    } else {
-        fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin is expected\n", __func__);
-        exit(EXIT_FAILURE);
     }
 
     if (asm_mode) {

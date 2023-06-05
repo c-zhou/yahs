@@ -33,8 +33,7 @@
 #include "ketopt.h"
 #include "sdict.h"
 #include "asset.h"
-
-#define AF_VERSION "1.1"
+#include "version.h"
 
 static double af_realtime0;
 

@@ -30,6 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <sys/resource.h>
 #include <sys/time.h>
@@ -37,6 +38,7 @@
 #include "asset.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
+#define strcasecmp(s1, s2) strcmp_case_insensitive(s1, s2)
 
 double cputime(void)
 {
@@ -208,5 +210,18 @@ int is_valid_bin_header(int64_t n)
     int64_t bin_version = BIN_V;
     magic_number |= bin_version;
     return n == magic_number;
+}
+
+int strcmp_case_insensitive (const char *s1, const char *s2)
+{
+    const unsigned char *p1 = (const unsigned char *) s1;
+    const unsigned char *p2 = (const unsigned char *) s2;
+    int result;
+    if (p1 == p2)
+        return 0;
+    while ((result = tolower (*p1) - tolower(*p2++)) == 0)
+        if (*p1++ == '\0')
+            break;
+    return result;
 }
 

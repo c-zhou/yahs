@@ -41,8 +41,7 @@
 #include "break.h"
 #include "enzyme.h"
 #include "asset.h"
-
-#define YAHS_VERSION "1.2a.2"
+#include "version.h"
 
 #undef DEBUG_ERROR_BREAK
 #undef DEBUG_GRAPH_PRUNE
@@ -81,6 +80,8 @@ static uint64_t n_stats[10];
 static uint32_t l_stats[10];
 
 double qbinom(double, double, double, int, int);
+
+enum fileTypes{NOSET, BED, BAM, BIN};
 
 int VERBOSE = 0;
 
@@ -606,6 +607,7 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
     fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
+    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    -?                     print long help with extra option list\n");
@@ -618,6 +620,7 @@ static ko_longopt_t long_options[] = {
     { "no-mem-check",   ko_no_argument, 303 },
     { "D-min-cells",    ko_required_argument, 304 },
     { "D-mass-frac",    ko_required_argument, 305 },
+    { "file-type",      ko_required_argument, 306 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -639,6 +642,7 @@ int main(int argc, char *argv[])
     int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell;
     uint32_t wd;
     double q_drop, d_mass_frac;
+    enum fileTypes f_type;
 
     const char *opt_str = "a:e:r:o:l:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
@@ -654,6 +658,7 @@ int main(int argc, char *argv[])
     q_drop = 0.1;
     d_min_cell = 30;
     d_mass_frac = 0.99;
+    f_type = NOSET;
     is_long_help = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
@@ -674,12 +679,23 @@ int main(int argc, char *argv[])
             no_contig_ec = 1;
         } else if (c == 302) {
             no_scaffold_ec = 1;
-        } else if (c == 303 ) {
+        } else if (c == 303) {
             no_mem_check = 1;
-        } else if (c == 304 ) {
+        } else if (c == 304) {
             d_min_cell = atoi(opt.arg);
-        } else if (c == 305 ) {
+        } else if (c == 305) {
             d_mass_frac = atof(opt.arg);
+        } else if (c == 306) {
+            if (strcasecmp(opt.arg, "BED") == 0)
+                f_type = BED;
+            else if (strcasecmp(opt.arg, "BAM") == 0)
+                f_type = BAM;
+            else if (strcasecmp(opt.arg, "BIN") == 0)
+                f_type = BIN;
+            else {
+                fprintf(stderr, "[E::%s] unknown file type: \"%s\"\n", __func__, opt.arg);
+                return 1;
+            }
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -737,11 +753,27 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[W::%s] using mass fraction threshold for D: %.2f\n", __func__, d_mass_frac);
     }
 
-    uint8_t mq8;
-    mq8 = (uint8_t) mq;
-
     fa = argv[opt.ind];
     link_file = argv[opt.ind + 1];
+
+    if (f_type == NOSET) {
+        ext = link_file + strlen(link_file) - 4;
+        if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
+        else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
+        else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
+        else {
+            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin or --file-type is expected\n", __func__);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (f_type == BIN && (*link_file == '-' || *link_file == '<')) {
+        fprintf(stderr, "[E::%s] BIN file format from STDIN is not supported\n", __func__);
+        exit(EXIT_FAILURE);
+    }
+
+    uint8_t mq8;
+    mq8 = (uint8_t) mq;
 
     fai = (char *) malloc(strlen(fa) + 5);
     sprintf(fai, "%s.fai", fa);
@@ -826,18 +858,17 @@ int main(int argc, char *argv[])
     if (out == 0)
         out = "yahs.out";
     
-    ext = link_file + strlen(link_file) - 4;
-    if (strcmp(ext, ".bam") == 0) {
+    if (f_type == BAM) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BAM) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_bam_file(link_file, fai, ml, 0, wd, q_drop, link_bin_file);
-    } else if (strcmp(ext, ".bed") == 0) {
+    } else if (f_type == BED) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BED) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_bed_file(link_file, fai, ml, 0, wd, q_drop, link_bin_file);
-    } else if (strcmp(ext, ".bin") == 0) {
+    } else if (f_type == BIN) {
         link_bin_file = malloc(strlen(link_file) + 1);
         sprintf(link_bin_file, "%s", link_file);
         // check if it is a valid BIN file
@@ -848,9 +879,6 @@ int main(int argc, char *argv[])
             exit(EXIT_FAILURE);
         }
         sd_destroy(sdict);    
-    } else {
-        fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin is expected\n", __func__);
-        exit(EXIT_FAILURE);
     }
 
 #ifdef DEBUG_OPTIONS

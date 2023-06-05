@@ -1,7 +1,7 @@
 /*********************************************************************************
  * MIT License                                                                   *
  *                                                                               *
- * Copyright (c) 2021 Chenxi Zhou <chnx.zhou@gmail.com>                          *
+ * Copyright (c) 2023 Chenxi Zhou <chnx.zhou@gmail.com>                          *
  *                                                                               *
  * Permission is hereby granted, free of charge, to any person obtaining a copy  *
  * of this software and associated documentation files (the "Software"), to deal *
@@ -24,42 +24,17 @@
 
 /********************************** Revision History *****************************
  *                                                                               *
- * 02/09/21 - Chenxi Zhou: Created                                               *
+ * 05/06/23 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
-#ifndef ASSET_H_
-#define ASSET_H_
 
-#include <stdint.h>
+#ifndef __YAHS_VERSION_H__
+#define __YAHS_VERSION_H__
 
-#define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define BUFF_SIZE 4096
-#define GAP_SZ 200
-#define BIN_H 0x5941485342494E56
-#define BIN_V 0x2
-#define LINK_EVIDENCE "proximity_ligation"
+#define AF_VERSION "1.1"
+#define JUICER_VERSION "1.1"
+#define YAHS_VERSION "1.2a.2"
 
-#ifdef __cplusplus
-extern "C" {
 #endif
 
-double realtime(void);
-double cputime(void);
-void liftrlimit();
-long peakrss(void);
-void ram_limit(long *total, long *avail);
-int file_copy(char *fin, char *fout);
-int8_t is_read_pair(const char *rname0, const char *rname1);
-uint32_t div_ceil(uint64_t x, uint32_t y);
-uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g);
-void write_bin_header(FILE *fo);
-int is_valid_bin_header(int64_t magic_number);
-int strcmp_case_insensitive(const char *s1, const char *s2);
-#ifdef __cplusplus
-}
-#endif
-
-#endif /* ASSET_H_ */
 

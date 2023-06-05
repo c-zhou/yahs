@@ -35,6 +35,7 @@
 #include <float.h>
 
 #include "khash.h"
+#include "kvec.h"
 #include "bamlite.h"
 #include "sdict.h"
 #include "enzyme.h"
@@ -48,6 +49,9 @@
 #define USE_MEDIAN_NORM
 #define MIN_RE_DENS .1
 static uint32_t MAX_RADIUS = 100;
+
+void *kopen(const char *fn, int *_fd);
+int kclose(void *a);
 
 KHASH_SET_INIT_STR(str)
 
@@ -1252,17 +1256,20 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, i
     return strdup(bam1_qname(b));
 }
 
-static char *parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
+static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, int32_t *e0, char **cname1, int32_t *s1)
 {
-    // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
-    if (b->core.flag & 0xF4C)
-        return 0;
+    // 0x4 0x8 [0x40] 0x100 0x200 0x400 0x800
+    // if (b->core.flag & 0xF4C)
+    if (b->core.flag & 0xF0C)
+        return -1;
+
     *cname0 = h->target_name[b->core.tid];
     *s0 = b->core.pos + 1;
+    *e0 = get_target_end(b) + 1;
     *cname1 = h->target_name[b->core.mtid];
     *s1 = b->core.mpos + 1;
 
-    return bam1_qname(b);
+    return (b->core.flag & 0x40)? 1 : 0;
 }
 
 void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
@@ -1272,12 +1279,13 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     bam_header_t *h;
     bam1_t *b;
     char *cname0, *cname1, *rname0, *rname1;
-    int32_t s0, s1, e0, e1;
+    int32_t s0, s1, e0, e1, first;
     uint32_t i0, i1, p0, p1;
     uint8_t q, q0, q1;
     int8_t buff;
-    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l;
+    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l, n, m, max_m;
     enum bam_sort_order so;
+    cov_t *cov;
     
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -1309,6 +1317,9 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
+    cov = cov_init(dict->n);
+    n = 0;
+    max_m = 0x7FFFFFFULL; // 128MB - ~1GB mem for covs
 
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
 
@@ -1348,6 +1359,23 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                                 fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                             }
                         } else {
+                            // update read coverage
+                            kv_push(uint64_t, cov->p[i0], (uint64_t) s0 << 32 | (uint32_t) 1);
+                            kv_push(uint64_t, cov->p[i0], (uint64_t) e0 << 32 | (uint32_t) -1);
+                            kv_push(uint64_t, cov->p[i1], (uint64_t) s1 << 32 | (uint32_t) 1);
+                            kv_push(uint64_t, cov->p[i1], (uint64_t) e1 << 32 | (uint32_t) -1);
+                            n += 4;
+                            if (n > max_m) {
+                                m = pos_compression(cov); // m is the position size after compression
+                                fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+                                if (m > n>>1) {
+                                    max_m <<= 1; // increase m limit if compression ratio smaller than 0.5
+                                    fprintf(stderr, "[I::%s] position memory buffer expanded max_m = %lu\n", __func__, max_m);
+                                }
+                                n = m;
+                            }
+
+                            // from zero-based to one-based
                             p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1);
                             p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1);
                             if (i0 > i1) {
@@ -1398,11 +1426,29 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
-            if(!parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
-                continue;
+            first = parse_bam_rec1(b, h, &cname0, &s0, &e0, &cname1, &s1);
 
-            if (s0 >= 0 && s1 >= 0) {
-                i0 = sd_get(dict, cname0);
+            if (first < 0) continue; // read not paired or not primary
+
+            i0 = sd_get(dict, cname0);
+            if (i0 != UINT32_MAX && s0 >=0 && e0 >= 0) {
+                // update read coverage
+                kv_push(uint64_t, cov->p[i0], (uint64_t) s0 << 32 | (uint32_t) 1);
+                kv_push(uint64_t, cov->p[i0], (uint64_t) e0 << 32 | (uint32_t) -1);
+                n += 2;
+                if (n > max_m) {
+                    m = pos_compression(cov); // m is the position size after compression
+                    fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+                    if (m > n>>1) {
+                        max_m <<= 1; // increase m limit if compression ratio smaller than 0.5
+                        fprintf(stderr, "[I::%s] position memory buffer expanded max_m = %lu\n", __func__, max_m);
+                    }
+                    n = m;
+                }
+            }
+
+            if (first == 0 && s0 >= 0 && s1 >= 0) { // second read only for each read pair
+                // i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
 
                 if (i0 == UINT32_MAX) {
@@ -1439,6 +1485,9 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         }
     }
 
+    m = pos_compression(cov);
+    fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+
     for (k = 0; k < kh_end(hmseq); ++k)
         if (kh_exist(hmseq, k))
             free((char *) kh_key(hmseq, k));
@@ -1458,7 +1507,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 
     fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 
-    cov_t *cov = bam_cstats(f, dict, 0);
+    // cov_t *cov = bam_cstats(f, dict, 0);
     cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
     fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
     fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
@@ -1472,6 +1521,8 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
 {
     FILE *fp, *fo;
+    int fd;
+    void *fh;
     char *line = NULL;
     size_t ln = 0;
     ssize_t read;
@@ -1479,7 +1530,8 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     uint8_t q, q0, q1;
     int8_t buff;
-    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l;
+    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l, n, m, max_m;
+    cov_t *cov;
 
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -1488,7 +1540,8 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
     sdict_t *dict = make_sdict_from_index(fai, ml);
 
-    fp = fopen(f, "r");
+    fh = kopen(f, &fd);
+    fp = fdopen(fd, "r");
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -1507,7 +1560,10 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
-    
+    cov = cov_init(dict->n);
+    n = 0;
+    max_m = 0x7FFFFFFULL; // 128MB - ~1GB mem for covs
+
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
 
     while ((read = getline(&line, &ln, fp)) != -1) {
@@ -1539,6 +1595,22 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else {
+                   // update read coverage
+                   kv_push(uint64_t, cov->p[i0], (uint64_t) s0 << 32 | (uint32_t) 1);
+                   kv_push(uint64_t, cov->p[i0], (uint64_t) e0 << 32 | (uint32_t) -1);
+                   kv_push(uint64_t, cov->p[i1], (uint64_t) s1 << 32 | (uint32_t) 1);
+                   kv_push(uint64_t, cov->p[i1], (uint64_t) e1 << 32 | (uint32_t) -1);
+                   n += 4;
+                   if (n > max_m) {
+                       m = pos_compression(cov); // m is the position size after compression
+                       fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+                       if (m > n>>1) {
+                           max_m <<= 1; // increase m limit if compression ratio smaller than 0.5
+                           fprintf(stderr, "[I::%s] position memory buffer expanded max_m = %lu\n", __func__, max_m);
+                       }
+                       n = m;
+                   }
+
                     // from zero-based to one-based
                     p0 = s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1) + 1;
                     p1 = s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1) + 1;
@@ -1572,6 +1644,9 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
         }
     }
 
+    m = pos_compression(cov);
+    fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+
     for (k = 0; k < kh_end(hmseq); ++k)
         if (kh_exist(hmseq, k))
             free((char *) kh_key(hmseq, k));
@@ -1580,6 +1655,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     if (line)
         free(line);
     fclose(fp);
+    kclose(fh);
     // write pair number
     fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
@@ -1587,7 +1663,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
     fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 
-    cov_t *cov = bed_cstats(f, dict);
+    // cov_t *cov = bed_cstats(f, dict);
     cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
     fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
     fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
