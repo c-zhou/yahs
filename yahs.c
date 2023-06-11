@@ -139,7 +139,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai, ml);
-    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
+    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
     
     int i, re = 0;
     uint64_t len = 0;
@@ -264,7 +264,25 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     graph_print(g, stderr, 1);
 #endif
 
-    search_graph_path(g, g->sdict, out);
+    asm_dict_t *d = make_asm_dict_from_graph(g, g->sdict);
+    // write scaffolds to AGP file
+    FILE *agp_out;
+    if (out) {
+        char *agp_out_name = (char *) malloc(strlen(out) + 5);
+        sprintf(agp_out_name, "%s.agp", out);
+        agp_out = fopen(agp_out_name, "w");
+        free(agp_out_name);
+    } else {
+        agp_out = fopen("scaffolds_FINAL.agp", "w");
+    }
+    if (agp_out == NULL) {
+        fprintf(stderr, "[E::%s] fail to open file to write\n", __func__);
+        return 0;
+    }
+    write_asm_dict_to_agp(d, agp_out);
+    fclose(agp_out);
+    
+    asm_destroy(d);
 
     intra_link_mat_destroy(intra_link_mat);
     inter_link_mat_destroy(inter_link_mat);
@@ -295,7 +313,7 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
     char* out1 = (char *) malloc(strlen(out) + 35);
     ec_round = err_no = 0;
     while (1) {
-        dict = ec_round? make_asm_dict_from_agp(sdict, out1) : make_asm_dict_from_sdict(sdict);
+        dict = ec_round? make_asm_dict_from_agp(sdict, out1, 1) : make_asm_dict_from_sdict(sdict);
         link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg, 0);
 #ifdef DEBUG_ERROR_BREAK
         fprintf(stderr, "[DEBUG_ERROR_BREAK::%s] ec_round %u link matrix\n", __func__, ec_round);
@@ -336,7 +354,7 @@ int scaffold_error_break(char *fai, char *link_file, uint32_t ml, uint8_t mq, ch
 {
     int dist_thres;
     sdict_t *sdict = make_sdict_from_index(fai, ml);
-    asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp);
+    asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp, 1);
 
     dist_thres = flank_size * 2;
     //dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution);
@@ -437,13 +455,19 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
             fprintf(stderr, "[DEBUG::%s] make AGP file from input FASTA file\n", __func__);
 #endif
             sprintf(out_agp_break, "%s_no_break.agp", out);
-            write_sdict_to_agp(sdict, out_agp_break);
+            fo = fopen(out_agp_break, "w");
+            if (fo == NULL) {
+                fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out_agp_break);
+                exit(EXIT_FAILURE);
+            }
+            write_sdict_to_agp(sdict, fo);
+            fclose(fo);
         }
     }
 
     r = rc = 0;
     
-    dict = make_asm_dict_from_agp(sdict, out_agp_break);
+    dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
     if (dict->n > MAX_N_SEQ) {
         fprintf(stderr, "[E::%s] sequence number exceeds limit (%d > %d)\n", __func__, dict->n, MAX_N_SEQ);
         fprintf(stderr, "[E::%s] consider removing short sequences before scaffolding, or\n", __func__);
@@ -458,7 +482,7 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
     while (r++ < nr) {
         fprintf(stderr, "[I::%s] scaffolding round %d resolution = %d\n", __func__, r, resolutions[r - 1]);
         
-        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        // dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
         if (n_stats[4] < resolutions[r - 1] * 10) {
             if (rc) {
                 fprintf(stderr, "[I::%s] assembly N50 (%lu) too small. End of scaffolding.\n", __func__, n_stats[4]);
@@ -471,7 +495,8 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
 
         sprintf(out_fn, "%s_r%02d", out, r);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, out_fn, resolutions[r - 1], &noise, d_min_cell, d_mass_frac, rss_limit, no_mem_check);
+        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, out_fn, resolutions[r - 1], 
+                &noise, d_min_cell, d_mass_frac, rss_limit, no_mem_check);
         if (!re) {
             sprintf(out_agp, "%s_r%02d.agp", out, r);
             if (no_scaffold_ec == 0) {
@@ -493,11 +518,11 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
             }
             ++rc;
         }
-        asm_destroy(dict);
+        // asm_destroy(dict);
 
         fprintf(stderr, "[I::%s] scaffolding round %d done\n", __func__, r);
 
-        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
         asm_sd_stats(dict, n_stats, l_stats);
         print_asm_stats(n_stats, l_stats, 0);
         asm_destroy(dict);
@@ -524,10 +549,10 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
 #endif
         sd_destroy(sdict);
         sdict = make_sdict_from_index(fai, 0);
-        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
         add_unplaced_short_seqs(dict, ml);
     } else {
-        dict = make_asm_dict_from_agp(sdict, out_agp_break);
+        dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
     }
     fo = fopen(out_agp, "w");
     if (fo == NULL) {
@@ -603,6 +628,10 @@ static void print_help(FILE *fp_help, int is_long_help)
     if (is_long_help) {
         fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
         fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
+        fprintf(fp_help, "    --seq-ctype   STR      sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-ctype   STR      gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-link    STR      gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+        fprintf(fp_help, "    --gap-size    INT      gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
     }
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
@@ -621,6 +650,10 @@ static ko_longopt_t long_options[] = {
     { "D-min-cells",    ko_required_argument, 304 },
     { "D-mass-frac",    ko_required_argument, 305 },
     { "file-type",      ko_required_argument, 306 },
+    { "seq-ctype",      ko_required_argument, 307 },
+    { "gap-ctype",      ko_required_argument, 308 },
+    { "gap-link",       ko_required_argument, 309 },
+    { "gap-size",       ko_required_argument, 310 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -696,6 +729,22 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "[E::%s] unknown file type: \"%s\"\n", __func__, opt.arg);
                 return 1;
             }
+        } else if (c == 307) {
+            DEFAULT_AGP_SEQ_COMPONENT_TYPE = agp_component_type_key(opt.arg);
+            if (DEFAULT_AGP_SEQ_COMPONENT_TYPE == AGP_CT_N || 
+                    DEFAULT_AGP_SEQ_COMPONENT_TYPE == AGP_CT_U)
+                fprintf(stderr, "[W::%s] a GAP component identifier will be used for sequences: %s\n",
+                        __func__, opt.arg);
+        } else if (c == 308) {
+            DEFAULT_AGP_GAP_COMPONENT_TYPE = agp_component_type_key(opt.arg);
+            if (DEFAULT_AGP_GAP_COMPONENT_TYPE != AGP_CT_N && 
+                    DEFAULT_AGP_GAP_COMPONENT_TYPE != AGP_CT_U)
+                fprintf(stderr, "[W::%s] a SEQ component identifier will be used for gaps: %s\n",
+                        __func__, opt.arg);
+        } else if (c == 309) {
+            DEFAULT_AGP_LINKAGE_EVIDENCE = agp_linkage_evidence_key(opt.arg);
+        } else if (c == 310) {
+            DEFAULT_AGP_GAP_SIZE = atoi(opt.arg);
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -753,6 +802,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[W::%s] using mass fraction threshold for D: %.2f\n", __func__, d_mass_frac);
     }
 
+    if (DEFAULT_AGP_GAP_COMPONENT_TYPE == AGP_CT_U && DEFAULT_AGP_GAP_SIZE != DEFAULT_AGP_U_GAP_SIZE)
+        fprintf(stderr, "[W::%s] type 'U' gap size is not %d\n", __func__, DEFAULT_AGP_U_GAP_SIZE);
+
     fa = argv[opt.ind];
     link_file = argv[opt.ind + 1];
 
@@ -774,6 +826,9 @@ int main(int argc, char *argv[])
 
     uint8_t mq8;
     mq8 = (uint8_t) mq;
+
+    if (out == 0)
+        out = "yahs.out";
 
     fai = (char *) malloc(strlen(fa) + 5);
     sprintf(fai, "%s.fai", fa);
@@ -855,9 +910,6 @@ int main(int argc, char *argv[])
         free(ecstr);
     }
 
-    if (out == 0)
-        out = "yahs.out";
-    
     if (f_type == BAM) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
@@ -920,7 +972,7 @@ int main(int argc, char *argv[])
         fclose(fo);
 
         sdict_t *sdict = make_sdict_from_index(fai, 0);
-        asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp_final);
+        asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp_final, 1);
         asm_sd_stats(dict, n_stats, l_stats);
         print_asm_stats(n_stats, l_stats, 1);
         asm_destroy(dict);

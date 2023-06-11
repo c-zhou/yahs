@@ -87,7 +87,7 @@ int trim_graph_pop_bubbles(graph_t *g);
 int trim_graph_pop_undirected(graph_t *g);
 int trim_graph_weak_edges(graph_t *g);
 int trim_graph_ambiguous_edges(graph_t *g);
-int search_graph_path(graph_t *g, asm_dict_t *dict, char *out);
+asm_dict_t *make_asm_dict_from_graph(graph_t *g, asm_dict_t *dict);
 
 #ifdef __cplusplus
 }

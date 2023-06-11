@@ -31,15 +31,16 @@
 #define ASSET_H_
 
 #include <stdint.h>
+#include <stdio.h>
 
 #define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
+#define MIN_MAX(x, min, max) MIN((MAX((x), (min))), (max))
 #define BUFF_SIZE 4096
-#define GAP_SZ 200
 #define BIN_H 0x5941485342494E56
 #define BIN_V 0x2
-#define LINK_EVIDENCE "proximity_ligation"
+#define strcasecmp(s1, s2) strcmp_case_insensitive(s1, s2)
 
 #ifdef __cplusplus
 extern "C" {
@@ -57,6 +58,7 @@ uint64_t linear_scale(uint64_t g, int *scale, uint64_t max_g);
 void write_bin_header(FILE *fo);
 int is_valid_bin_header(int64_t magic_number);
 int strcmp_case_insensitive(const char *s1, const char *s2);
+void positive_or_die(int num);
 #ifdef __cplusplus
 }
 #endif

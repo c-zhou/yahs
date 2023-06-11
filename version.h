@@ -31,9 +31,9 @@
 #ifndef __YAHS_VERSION_H__
 #define __YAHS_VERSION_H__
 
-#define AF_VERSION "1.1"
-#define JUICER_VERSION "1.1"
-#define YAHS_VERSION "1.2a.2"
+#define AF_VERSION "1.2"
+#define JUICER_VERSION "1.2"
+#define YAHS_VERSION "1.2"
 
 #endif
 

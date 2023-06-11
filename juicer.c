@@ -33,6 +33,7 @@
 #include "khash.h"
 #include "bamlite.h"
 #include "ketopt.h"
+#include "kvec.h"
 #include "sdict.h"
 #include "asset.h"
 #include "version.h"
@@ -54,9 +55,10 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
     uint64_t p0, p1, pair_n, pair_c, pair_u;
     int64_t magic_number;
     uint8_t buffer[BUFF_SIZE * 17];
+    CC_ERR_t err0, err1;
 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
-    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
+    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
     
     // check BIN file header consistency
     if ((ret = file_sdict_match(f, sdict))) {
@@ -88,10 +90,10 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
             if (*(uint8_t *) (buffer + i + 16) < mq)
                 continue;
 
-            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, count_gap);
-            sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, count_gap);
+            err0 = sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, count_gap);
+            err1 = sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, count_gap);
             
-            if (i0 == UINT32_MAX || i1 == UINT32_MAX) {
+            if (err0 != CC_SUCCESS || err1 != CC_SUCCESS) {
                 // fprintf(stderr, "[W::%s] sequence not found \n", __func__);
                 ++pair_u;
             } else {
@@ -124,14 +126,15 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     uint64_t p0, p1, rec_c, pair_c;
     uint8_t q0, q1;
     int8_t buff;
-    
+    CC_ERR_t err0, err1;
+
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
     int absent;
     hmseq = kh_init(str);
 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
-    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
+    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
 
     fh = kopen(f, &fd);
     fp = fdopen(fd, "r");
@@ -161,20 +164,30 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
                 if (q0 < mq || q1 < mq)
                     continue;
                 
-                sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1) + 1, &i0, &p0, count_gap);
-                sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1) + 1, &i1, &p1, count_gap);
+                err0 = sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
+                err1 = sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
                 
-                if (i0 == UINT32_MAX) {
-                    k = kh_put(str, hmseq, cname0, &absent);
-                    if (absent) {
-                        kh_key(hmseq, k) = strdup(cname0);
-                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                if (err0 != CC_SUCCESS) {
+                    if (err0 == SEQ_NOT_FOUND) {
+                        k = kh_put(str, hmseq, cname0, &absent);
+                        if (absent) {
+                            kh_key(hmseq, k) = strdup(cname0);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                        }
+                    } else if (err0 == POS_NOT_IN_RANGE) {
+                        fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__, 
+                                cname0, s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1));
                     }
-                } else if(i1 == UINT32_MAX) {
-                    k = kh_put(str, hmseq, cname1, &absent);
-                    if (absent) {
-                        kh_key(hmseq, k) = strdup(cname1);
-                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                } else if (err1 != CC_SUCCESS) {
+                    if (err1 == SEQ_NOT_FOUND) {
+                        k = kh_put(str, hmseq, cname1, &absent);
+                        if (absent) {
+                            kh_key(hmseq, k) = strdup(cname1);
+                            fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                        }
+                    } else if (err1 == POS_NOT_IN_RANGE) {
+                        fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
+                                cname1, s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1));
                     }
                 } else {
                     if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
@@ -223,8 +236,8 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
         *s = -1;
         *e = -1;
     } else {
-        *s = b->core.pos + 1;
-        *e = get_target_end(b) + 1;
+        *s = b->core.pos;
+        *e = get_target_end(b);
     }
 
     return strdup(bam1_qname(b));
@@ -236,9 +249,9 @@ static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0
     if (b->core.flag & 0xF4C)
         return -1;
     *cname0 = h->target_name[b->core.tid];
-    *s0 = b->core.pos + 1;
+    *s0 = b->core.pos;
     *cname1 = h->target_name[b->core.mtid];
-    *s1 = b->core.mpos + 1;
+    *s1 = b->core.mpos;
 
     return 0;
 }
@@ -254,6 +267,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     uint64_t p0, p1, rec_c, pair_c;
     int8_t buff;
     enum bam_sort_order so;
+    CC_ERR_t err0, err1;
 
     khash_t(str) *hmseq; // for absent sequences
     khint_t k;
@@ -261,7 +275,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     hmseq = kh_init(str);
 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
-    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp) : make_asm_dict_from_sdict(sdict);
+    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
 
     fp = bam_open(f, "r");
     if (fp == NULL) {
@@ -298,30 +312,38 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                 if (strcmp(rname0, rname1) == 0) {
                     buff = 0;
 
-                    if (s0 >= 0 && s1 >= 0) {
-                        sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
-                        sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
+                    err0 = sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1), &i0, &p0, count_gap);
+                    err1 = sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1), &i1, &p1, count_gap);
 
-                        if (i0 == UINT32_MAX) {
+                    if (err0 != CC_SUCCESS) {
+                        if (err0 == SEQ_NOT_FOUND) {
                             k = kh_put(str, hmseq, cname0, &absent);
                             if (absent) {
                                 kh_key(hmseq, k) = strdup(cname0);
                                 fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
                             }
-                        } else if (i1 == UINT32_MAX) {
+                        } else if (err0 == POS_NOT_IN_RANGE) {
+                            fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
+                                    cname0, s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1));
+                        }
+                    } else if (err1 != CC_SUCCESS) {
+                        if (err1 == SEQ_NOT_FOUND) {
                             k = kh_put(str, hmseq, cname1, &absent);
                             if (absent) {
                                 kh_key(hmseq, k) = strdup(cname1);
                                 fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                             }
-                        } else {
-                            if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
-                                fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
-                            else
-                                fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
-                            
-                            ++pair_c;
+                        } else if (err1 == POS_NOT_IN_RANGE) {
+                            fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
+                                    cname1, s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1));
                         }
+                    } else {
+                        if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                            fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
+                        else
+                            fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+
+                        ++pair_c;
                     }
 
                     free(rname0);
@@ -353,20 +375,30 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
             if(parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1) < 0)
                 continue;
 
-            sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
-            sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1, &i1, &p1, count_gap);
+            err0 = sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
+            err1 = sd_coordinate_conversion(dict, sd_get(sdict, cname1), s1, &i1, &p1, count_gap);
 
-            if (i0 == UINT32_MAX) {
-                k = kh_put(str, hmseq, cname0, &absent);
-                if (absent) {
-                    kh_key(hmseq, k) = strdup(cname0);
-                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+            if (err0 != CC_SUCCESS) {
+                if (err0 == SEQ_NOT_FOUND) {
+                    k = kh_put(str, hmseq, cname0, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname0);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                    }
+                } else if (err0 == POS_NOT_IN_RANGE) {
+                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
+                            cname0, s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1));
                 }
-            } else if (i1 == UINT32_MAX) {
-                k = kh_put(str, hmseq, cname1, &absent);
-                if (absent) {
-                    kh_key(hmseq, k) = strdup(cname1);
-                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+            } else if (err1 != CC_SUCCESS) {
+                if (err1 == SEQ_NOT_FOUND) {
+                    k = kh_put(str, hmseq, cname1, &absent);
+                    if (absent) {
+                        kh_key(hmseq, k) = strdup(cname1);
+                        fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                    }
+                } else if (err1 == POS_NOT_IN_RANGE) {
+                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
+                            cname1, s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1));
                 }
             } else {
                 if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
@@ -399,99 +431,61 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
     return 0;
 }
 
-static uint64_t assembly_annotation(const char *f, const char *out_agp, const char *out_annot, const char *out_lift, int *scale, uint64_t max_s, uint64_t *g)
+static uint64_t assembly_annotation(const char *f, sdict_t *sdict, const char *out_agp, const char *out_annot, 
+        const char *out_lift, int *scale, uint64_t max_s, uint64_t *g)
 {
-    FILE *fp, *fo_agp, *fo_annot, *fo_lift;
-    char *line;
-    size_t ln = 0;
-    ssize_t read;
-    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[4];
-    char *name;
-    uint32_t c, s, l, cstart, cend;
+    uint32_t i, j, c, n, m;
+    int *seqs;
+    FILE *fo_agp, *fo_annot, *fo_lift;
     uint64_t genome_size, scaled_gs;
+    asm_dict_t *dict;
+    sd_seg_t seg;
 
-    fp = fopen(f, "r");
-    if (fp == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
-        exit(EXIT_FAILURE);
-    }
     fo_agp = fopen(out_agp, "w");
     fo_annot = fopen(out_annot, "w");
     fo_lift = fopen(out_lift, "w");
     
-    line = name = NULL;
+    dict = make_asm_dict_from_agp(sdict, f, 1);
+    n = dict->u + dict->n;
+    seqs = (int *) calloc(n, sizeof(int));
     genome_size = 0;
-    c = s = 0;
-    while ((read = getline(&line, &ln, fp)) != -1) {
-        sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
-        if (!strncmp(type, "N", 1))
-            continue;
-        if (!name)
-            name = strdup(sname);
-        if (strcmp(sname, name)) {
-            name = strdup(sname);
-            ++s;
+    c = j = 0;
+    m = dict->s[j++].n;
+    for (i = 0; i < dict->u; ++i) {
+        seg = dict->seg[i];
+        fprintf(fo_agp, "assembly\t%lu\t%lu\t%u\t%s\t%s\t%u\t%u\t%s\n", 
+                genome_size + 1, genome_size + seg.y, i + 1, agp_component_type_val(seg.t),
+                sdict->s[seg.c>>1].name, seg.x + 1, seg.x + seg.y, agp_orientation_val(seg.r));
+        fprintf(fo_annot, ">ctg%08u.1 %u %u\n", i + 1, i + 1, seg.y);
+        fprintf(fo_lift, "ctg%08u.1\t%u\t%u\t%u\t%s\t%s\t%u\t%u\t%s\n",
+                i + 1, 1, seg.y, 1, agp_component_type_val(seg.t), sdict->s[seg.c>>1].name, 
+                seg.x + 1, seg.x + seg.y, agp_orientation_val(AGP_OT_PLUS));
+        if (i == m) {
+            m += dict->s[j++].n;
+            ++c;
         }
-        l = strtoul(cends, NULL, 10) - strtoul(cstarts, NULL, 10) + 1;
-        fprintf(fo_agp, "assembly\t%lu\t%lu\t%u\tW\t%s\t%s\t%s\t%s\n", genome_size + 1, genome_size + l, ++c, cname, cstarts, cends, oris);
-        genome_size += l;
+        seqs[c++] = (int) (i + 1) * (seg.r == AGP_OT_MINUS? -1 : 1);
+        genome_size += seg.y;
     }
-    if (line)
-        free(line);
-    fclose(fp);
 
-    scaled_gs = linear_scale(genome_size, scale, max_s);
-
-    int *seqs;
-    fp = fopen(f, "r");
-    line = name = NULL;
-    seqs = (int *) calloc(c + s, sizeof(int));
-    c = s = 0;
-    while ((read = getline(&line, &ln, fp)) != -1) {
-        sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
-        if (!strncmp(type, "N", 1))
-            continue;
-        if (!name)
-             name = strdup(sname);
-        if (strcmp(sname, name)) {
-            name = strdup(sname);
-            ++s;
-        }
-        cstart = strtoul(cstarts, NULL, 10);
-        cend = strtoul(cends, NULL, 10);
-        l = cend - cstart + 1;
-        // l = l >> *scale;
-        ++c;
-        fprintf(fo_annot, ">ctg%08u.1 %u %u\n", c, c, l);
-        // fprintf(fo_lift, "ctg%08u.1 %s %u %u\n", c, cname, cstart, cend);
-        fprintf(fo_lift, "ctg%08u.1\t%u\t%u\t%u\tW\t%s\t%u\t%u\t+\n", c, 1, l, 1, cname, cstart, cend);
-        seqs[c + s - 1] = c * (strncmp(oris, "+", 1)? -1 : 1);
-    }
-    uint32_t i;
-    for (i = 0; i < c + s - 1; ++i) {
-        if (seqs[i] == 0) {
-            fprintf(fo_annot, "\n");
-        } else {
+    for (i = 0; i < n; ++i) {
+        // seqs[n - 1] is always 0
+        if (seqs[i]) {
             fprintf(fo_annot, "%d", seqs[i]);
-            if (seqs[i + 1] != 0)
-                fprintf(fo_annot, " ");
+            fputc(seqs[i + 1]? ' ' : '\n', fo_annot);
         }
     }
-    fprintf(fo_annot, "%d\n", seqs[c + s - 1]);
-    fclose(fp);
     
     fclose(fo_agp);
     fclose(fo_annot);
     fclose(fo_lift);
-
-    if (line)
-        free(line);
-    if (name)
-        free(name);
     free(seqs);
-    
-    *g = genome_size;
 
+    asm_destroy(dict);
+
+    scaled_gs = linear_scale(genome_size, scale, max_s);
+    *g = genome_size;
+    
     return scaled_gs;
 }
 
@@ -504,7 +498,7 @@ uint64_t assembly_scale_max_seq(asm_dict_t *dict, int *scale, uint64_t max_s, ui
     s = 0;
     for (i = 0; i < dict->n; ++i) {
         seq = dict->s[i];
-        s = MAX(s, seq.len + (seq.n - 1) * GAP_SZ);
+        s = MAX(s, seq.len + seq.gap);
     }
     
     *g = s;
@@ -525,6 +519,10 @@ static void print_help_pre(FILE *fp_help)
 
 static ko_longopt_t long_options[] = {
     { "file-type",      ko_required_argument, 301 },
+    { "seq-ctype",      ko_required_argument, 302 },
+    { "gap-ctype",      ko_required_argument, 303 },
+    { "gap-link",       ko_required_argument, 304 },
+    { "gap-size",       ko_required_argument, 305 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -652,11 +650,11 @@ static int main_pre(int argc, char *argv[])
         sprintf(agp1, "%s.assembly.agp", out);
         sprintf(annot, "%s.assembly", out);
         sprintf(lift, "%s.liftover.agp", out);
-        scaled_s = assembly_annotation(agp, agp1, annot, lift, &scale, (uint64_t) INT_MAX, &max_s);
-        dict = make_asm_dict_from_agp(sdict, agp1);
+        scaled_s = assembly_annotation(agp, sdict, agp1, annot, lift, &scale, (uint64_t) INT_MAX, &max_s);
+        dict = make_asm_dict_from_agp(sdict, agp1, 1);
     } else {
         sprintf(agp1, "%s", agp);
-        dict = make_asm_dict_from_agp(sdict, agp1);
+        dict = make_asm_dict_from_agp(sdict, agp1, 1);
         scaled_s = assembly_scale_max_seq(dict, &scale, (uint64_t) INT_MAX, &max_s);
     }
 
@@ -676,7 +674,8 @@ static int main_pre(int argc, char *argv[])
         fprintf(stderr, "[I::%s] scale factor: %d\n", __func__, 1 << scale);
         fprintf(stderr, "[I::%s] chromosome sizes for juicer_tools pre -\n", __func__);
         fprintf(stderr, "PRE_C_SIZE: assembly %lu\n", scaled_s);
-        fprintf(stderr, "[I::%s] JUICER_PRE CMD: java -Xmx36G -jar ${juicer_tools} pre %s %s.hic <(echo \"assembly %lu\")\n", __func__, out1, out, scaled_s);
+        fprintf(stderr, "[I::%s] JUICER_PRE CMD: java -Xmx36G -jar ${juicer_tools} pre %s %s.hic <(echo \"assembly %lu\")\n", 
+                __func__, out1, out, scaled_s);
     } else {
         if (scale) {
             fprintf(stderr, "[W::%s] maximum scaffold length exceeds %d (=%lu)\n", __func__, INT_MAX, max_s);
@@ -687,7 +686,7 @@ static int main_pre(int argc, char *argv[])
         sd_aseq_t seq;
         for (i = 0; i < dict->n; ++i) {
             seq = dict->s[i];
-            fprintf(stderr, "PRE_C_SIZE: %s %lu\n", seq.name, (seq.len + (seq.n - 1) * GAP_SZ) >> scale);
+            fprintf(stderr, "PRE_C_SIZE: %s %lu\n", seq.name, (seq.len + seq.gap) >> scale);
         }
     }
 
@@ -714,9 +713,21 @@ static int main_pre(int argc, char *argv[])
     int i;
     for (i = 0; i < argc; ++i)
         fprintf(stderr, " %s", argv[i]);
-    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, 
+            realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
 
     return ret;
+}
+
+static int is_empty_line(char *line)
+{
+    char *c;
+    c = line;
+    while (isspace((unsigned char) *c))
+        c++;
+    if(*c == 0)
+        return 1;
+    return 0;
 }
 
 static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
@@ -724,93 +735,115 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
     asm_dict_t *dict;
     FILE *fp;
 
-    fp = fopen(assembly, "r");
-    if (fp == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
-        exit(EXIT_FAILURE);
-    }
-
-    dict = make_asm_dict_from_agp(sdict, lift);
+    dict = make_asm_dict_from_agp(sdict, lift, 1);
     
     char *line = NULL;
     size_t ln = 0;
     ssize_t read;
     char cname[1024], c0[1024], c1[1024], *cstr;
     int32_t cid, sid, fid, sign;
-    uint32_t clen, mlen, s, p, *coords;
+    uint32_t i, clen, mlen, s, p, *coords;
     int64_t slen;
     size_t m;
+    kvec_t(int) segs;
 
     m = 4;
     coords = (uint32_t *) malloc(sizeof(uint32_t) * m * 3);
     c0[0] = c1[0] = '\0';
     mlen = 0;
     sid = 0;
+    kv_init(segs);
 
+    fp = fopen(assembly, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
+        exit(EXIT_FAILURE);
+    }
     while ((read = getline(&line, &ln, fp)) != -1) {
-        if (line[0] == '>') {
-            sscanf(line, "%s %d %u", cname, &cid, &clen);
-            cstr = strstr(cname, ":::");
-            if (cstr != NULL) {
-                cname[cstr - cname] = '\0';
-            }
-            strcpy(c1, cname + 1);
-            
-            if (!strcmp(c0, c1)) {
-                mlen += clen;
-            } else {
-                mlen = clen;
-                strcpy(c0, c1);
-            }
+        if (is_empty_line(line) || line[0] != '>')
+            continue;
+        
+        sscanf(line, "%s %d %u", cname, &cid, &clen);
+        cstr = strstr(cname, ":::");
+        if (cstr != NULL) {
+            cname[cstr - cname] = '\0';
+        }
+        strcpy(c1, cname + 1);
 
-            if (sd_coordinate_rev_conversion(dict, asm_sd_get(dict, c1), mlen - clen + 1, &s, &p, 0)) {
-                fprintf(stderr, "[E::%s] coordinates conversion error %s %u\n", __func__, c1, mlen - clen + 1);
-                exit(EXIT_FAILURE);
-            }
-            
-            if (cid > m) {
-                m <<= 1;
-                coords = (uint32_t *) realloc(coords, sizeof(uint32_t) * m * 3);
-            }
-
-            cid -= 1;
-            coords[cid * 3] = s;
-            coords[cid * 3 + 1] = p;
-            coords[cid * 3 + 2] = clen;
+        if (!strcmp(c0, c1)) {
+            mlen += clen;
         } else {
-            ++sid;
-            fid = 0;
-            slen = 0;
+            mlen = clen;
+            strcpy(c0, c1);
+        }
 
-            char  *eptr, *fptr;
+        if (sd_coordinate_rev_conversion(dict, asm_sd_get(dict, c1), mlen - clen, &s, &p, 0)) {
+            fprintf(stderr, "[E::%s] coordinates conversion error %s %u\n", __func__, c1, mlen - clen);
+            exit(EXIT_FAILURE);
+        }
             
-            cid = strtol(line, &eptr, 10);
+        if (cid > m) {
+            m <<= 1;
+            coords = (uint32_t *) realloc(coords, sizeof(uint32_t) * m * 3);
+        }
+
+        cid -= 1;
+        coords[cid * 3] = s;
+        coords[cid * 3 + 1] = p + 1; // 0-based to 1-based coordinates
+        coords[cid * 3 + 2] = clen;
+    }
+    fclose(fp);
+
+    fp = fopen(assembly, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
+        exit(EXIT_FAILURE);
+    }
+    while ((read = getline(&line, &ln, fp)) != -1) {
+        if (is_empty_line(line) || line[0] == '>')
+            continue;
+
+        segs.n = 0;
+        char *eptr, *fptr;
+        cid = strtol(line, &eptr, 10);
+        if (coords[(abs(cid) - 1) * 3 + 2] > 0)
+            kv_push(int, segs, cid);
+        while (*eptr != '\n') {
+            cid = strtol(eptr + 1, &fptr, 10);
+            if (coords[(abs(cid) - 1) * 3 + 2] > 0)
+                kv_push(int, segs, cid);
+            eptr = fptr;
+        }
+
+        if (segs.n == 0) continue;
+
+        ++sid;
+        fid = 0;
+        slen = 0;
+        for (i = 0; i < segs.n; ++i) {
+            cid = segs.a[i];
             sign = cid > 0;
             cid = abs(cid) - 1;
-            fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tW\t%s\t%d\t%d\t%c\n", sid, slen + 1, slen + coords[cid * 3 + 2], ++fid, sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1, "-+"[sign]);
+            fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\t%s\t%s\t%d\t%d\t%s\n", sid, slen + 1, 
+                    slen + coords[cid * 3 + 2], ++fid, agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE), 
+                    sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1,
+                    sign? agp_orientation_val(AGP_OT_PLUS) : agp_orientation_val(AGP_OT_MINUS));
             slen += coords[cid * 3 + 2];
-            while (*eptr != '\n') {
-                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tN\t%d\tscaffold\tyes\t%s\n", sid, slen + 1, slen + GAP_SZ, ++fid, GAP_SZ, LINK_EVIDENCE);
-                slen += GAP_SZ;
-                
-                cid = strtol(eptr + 1, &fptr, 10);
-                sign = cid > 0;
-                cid = abs(cid) - 1;
-                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\tW\t%s\t%d\t%d\t%c\n", sid, slen + 1, slen + coords[cid * 3 + 2], ++fid, sdict->s[coords[cid * 3]].name, coords[cid * 3 + 1], coords[cid * 3 + 1] + coords[cid * 3 + 2] - 1, "-+"[sign]);
-                slen += coords[cid * 3 + 2];
-
-                eptr = fptr;
+            if (i != segs.n - 1) {
+                fprintf(fo, "scaffold_%d\t%ld\t%ld\t%d\t%s\t%d\t%s\t%s\t%s\n", sid, slen + 1, 
+                        slen + DEFAULT_AGP_GAP_SIZE, ++fid, agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE),
+                        DEFAULT_AGP_GAP_SIZE, agp_gap_type_val(DEFAULT_AGP_GAP_TYPE), agp_linkage_val(AGP_LG_YES), 
+                        agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+                slen += DEFAULT_AGP_GAP_SIZE;
             }
         }
     }
-    
-    if (line)
-        free(line);
     fclose(fp);
 
-    asm_destroy(dict);
-
+    free(line);
     free(coords);
+    kv_destroy(segs);
+    asm_destroy(dict);
 
     return 0;
 }
@@ -820,6 +853,10 @@ static void print_help_post(FILE *fp_help)
     fprintf(fp_help, "Usage: juicer post [options] <review.assembly> <liftover.agp> <contigs.fa[.fai]>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for scaffolds FASTA output) [stdout]\n");
+    fprintf(fp_help, "    --seq-ctype STR   sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
+    fprintf(fp_help, "    --gap-ctype STR   gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
+    fprintf(fp_help, "    --gap-link  STR   gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+    fprintf(fp_help, "    --gap-size  INT   gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
     fprintf(fp_help, "    --version         show version number\n");
 }
 
@@ -839,7 +876,23 @@ static int main_post(int argc, char *argv[])
     fa = fa1 = out = out1 = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
-        if (c == 'o') {
+        if (c == 302) {
+            DEFAULT_AGP_SEQ_COMPONENT_TYPE = agp_component_type_key(opt.arg);
+            if (DEFAULT_AGP_SEQ_COMPONENT_TYPE == AGP_CT_N ||
+                    DEFAULT_AGP_SEQ_COMPONENT_TYPE == AGP_CT_U)
+                fprintf(stderr, "[W::%s] a GAP component identifier will be used for sequences: %s\n",
+                        __func__, opt.arg);
+        } else if (c == 303) {
+            DEFAULT_AGP_GAP_COMPONENT_TYPE = agp_component_type_key(opt.arg);
+            if (DEFAULT_AGP_GAP_COMPONENT_TYPE != AGP_CT_N &&
+                    DEFAULT_AGP_GAP_COMPONENT_TYPE != AGP_CT_U)
+                fprintf(stderr, "[W::%s] a SEQ component identifier will be used for gaps: %s\n",
+                        __func__, opt.arg);
+        } else if (c == 304) {
+            DEFAULT_AGP_LINKAGE_EVIDENCE = agp_linkage_evidence_key(opt.arg);
+        } else if (c == 305) {
+            DEFAULT_AGP_GAP_SIZE = atoi(opt.arg);
+        } else if (c == 'o') {
             out = opt.arg;
         } else if (c == 'h') {
             fp_help = stdout;
@@ -914,7 +967,8 @@ static int main_post(int argc, char *argv[])
     int i;
     for (i = 0; i < argc; ++i)
         fprintf(stderr, " %s", argv[i]);
-    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
+    fprintf(stderr, "\n[I::%s] Real time: %.3f sec; CPU: %.3f sec; Peak RSS: %.3f GB\n", __func__, 
+            realtime() - jc_realtime0, cputime(), peakrss() / 1024.0 / 1024.0 / 1024.0);
 
     return ret;
 }

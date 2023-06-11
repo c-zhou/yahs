@@ -33,6 +33,7 @@
 #include <assert.h>
 
 #include "kdq.h"
+#include "kvec.h"
 
 #include "sdict.h"
 #include "break.h"
@@ -115,7 +116,7 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
-            if (i0 == i1) {
+            if (i0 == i1 && i0 != UINT32_MAX) {
                 ++link_c[labs((long) p0 - p1) / resolution];
                 ++intra_c;
             }
@@ -220,12 +221,14 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i),     *(uint32_t *) (buffer + i + 4),  &i0, &p0, 0);
             sd_coordinate_conversion(dict, *(uint32_t *) (buffer + i + 8), *(uint32_t *) (buffer + i + 12), &i1, &p1, 0);
 
-            if (p0 > p1)
-                SWAP(uint64_t, p0, p1);
-            if (i0 == i1 && p1 - p0 <= dist_thres) {
-                link_mat->link[i0].link[(MAX(p0, 1) - 1) / resolution] += 1;
-                link_mat->link[i1].link[(MAX(p1, 1) - 1) / resolution] -= 1;
-                ++intra_c;
+            if (i0 == i1 && i0 != UINT32_MAX) {
+                if (p0 > p1)
+                    SWAP(uint64_t, p0, p1);
+                if (p1 - p0 < dist_thres) {
+                    link_mat->link[i0].link[p0 / resolution] += 1;
+                    link_mat->link[i1].link[p1 / resolution] -= 1;
+                    ++intra_c;
+                }
             }
         }
     }
@@ -274,15 +277,13 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
 // sort by position = higher 32 bits
 int pos_cmp(const void *p, const void *q)
 {
-    int64_t d = *(int64_t *) p - *(int64_t *) q;
-    return d == 0? 0 : (d > 0? 1 : -1);
+    return (*(int64_t *) p > *(int64_t *) q) - (*(int64_t *) p < *(int64_t *) q);
 }
 
 // sort by link count = lower 32 bits
 int cnt_cmp(const void *p, const void *q)
 {
-    int32_t d = *(int32_t *) p - *(int32_t *) q;
-    return d == 0? 0 : (d > 0? 1 : -1);
+    return (*(int32_t *) p > *(int32_t *) q) - (*(int32_t *) p < *(int32_t *) q);
 }
 
 KDQ_INIT(int64_t)
@@ -319,17 +320,17 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
         a = 0;
         for (j = 1; j < seq.n; ++j) {
             seg = segs[seq.s + j];
-            s = (MAX(seg.a - MIN(flank_size, segs[seq.s + j - 1].y), 1) - 1) / bin_size;
-            e = (MAX(seg.a + MIN(flank_size, seg.y), 1) - 1) / bin_size;
-            // s = (MAX(seg.a - MIN(flank_size, seg.a), 1) - 1) / bin_size;
-            // e = (MAX(seg.a + MIN(flank_size, seq.len - seg.a), 1) - 1) / bin_size;
+            s = (seg.a - MIN(flank_size, segs[seq.s + j - 1].y)) / bin_size;
+            e = (seg.a + MIN(flank_size, seg.y) - 1) / bin_size;
+            // s = (MAX(seg.a - MIN(flank_size, segs[seq.s + j - 1].y), 1) - 1) / bin_size;
+            // e = (MAX(seg.a + MIN(flank_size, seg.y), 1) - 1) / bin_size;
             t = e - s + 1;
             qsort(link + s, t, sizeof(int64_t), cnt_cmp);
             mcnt = t & 1? (int32_t) link[(e + s) / 2] : ((int32_t) link[(e + s) / 2] + (int32_t) link[(e + s) / 2 + 1]) / 2.;
             mcnt *= fold_thres;
             qsort(link + s, t, sizeof(int64_t), pos_cmp);
 
-            if ((int32_t) link[(MAX(seg.a, 1) - 1) / bin_size] < mcnt) {
+            if ((int32_t) link[seg.a / bin_size] < mcnt) {
                 if (!a) {
                     if (b_n == b_m) {
                         b_m <<= 1;
@@ -345,7 +346,8 @@ bp_t *detect_break_points_local_joint(link_mat_t *link_mat, uint32_t bin_size, d
                 }
                 add_break_point(bp1, seg.a);
 #ifdef DEBUG_LOCAL_BREAK
-                fprintf(stderr, "[DEBUG_LOCAL_BREAK::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__, seq.name, seg.a, (int32_t) link[(MAX(seg.a, 1) - 1) / bin_size], mcnt);
+                fprintf(stderr, "[DEBUG_LOCAL_BREAK::%s] break local joint: %s at %lu (link number %d < %.3f)\n", __func__,
+                        seq.name, seg.a, (int32_t) link[seg.a / bin_size], mcnt);
 #endif
             }
         }
@@ -555,85 +557,166 @@ void print_break_point(bp_t *bp, asm_dict_t *dict, FILE *fp)
 
 void write_break_agp(asm_dict_t *d, bp_t *breaks, uint32_t b_n, FILE *fp)
 {
-    uint32_t i, j, s, ns, ms;
+    uint32_t i, j, s, ns;
     int64_t L, l;
-    uint64_t len;
-    sd_seg_t *segs, seg;
+    uint64_t len, gap;
+    sd_seg_t seg;
+    sd_aseq_t aseq, aseq1;
     sdict_t *sd;
     uint64_t *p;
-    uint32_t p_n;
+    uint32_t p_n, g;
+    char s_name[32];
+    kvec_t(sd_seg_t) segs1;
+    kvec_t(uint32_t) gs, gsize, gcomp, gtype, glink, gevid;
 
-    ns = 0;
-    ms = 4096;
-    segs = (sd_seg_t *) malloc(ms * sizeof(sd_seg_t));
     sd = d->sdict;
+    kv_init(segs1);
+    kv_init(gs);
+    kv_init(gsize);
+    kv_init(gcomp);
+    kv_init(gtype);
+    kv_init(glink);
+    kv_init(gevid);
+    sprintf(s_name, "scaffold_");
     s = 0;
+
     for (i = 0; i < d->n; ++i) {
         if (b_n == 0 || i < breaks->s) {
             // no breaks
-            write_segs_to_agp(d->seg + d->s[i].s, d->s[i].n, sd, ++s, fp);
+            // write the orignal seg block but with a new name
+            sprintf(&s_name[9], "%u", ++s);
+            write_segs_to_agp(d->seg + d->s[i].s, d->s[i].n, &d->s[i], sd, s_name, fp);
         } else {
             // contain break points
             p = breaks->p;
             p_n = breaks->n;
-            len = 0;
-            for (j = 0; j < d->s[i].n; ++j) {
-                seg = d->seg[d->s[i].s + j];
+            aseq = d->s[i];
+            len = gap = 0;
+            g = ns = 0;
+            segs1.n = gs.n = gsize.n = gcomp.n = gtype.n = glink.n = gevid.n = 0;
+            for (j = 0; j < aseq.n; ++j) {
+                seg = d->seg[aseq.s + j];
+                
+                // add gap information
+                while (g < aseq.gn && aseq.gs[g] <= j) {
+                    kv_push(uint32_t, gs, ns);
+                    kv_push(uint32_t, gsize, aseq.gsize[g]);
+                    kv_push(uint32_t, gcomp, aseq.gcomp[g]);
+                    kv_push(uint32_t, gtype, aseq.gtype[g]);
+                    kv_push(uint32_t, glink, aseq.glink[g]);
+                    kv_push(uint32_t, gevid, aseq.gevid[g]);
+                    gap += aseq.gsize[g];
+                    ++g;
+                }
+
                 if (p_n == 0 || seg.a + seg.y <= p[0]) {
                     // current seg contains no break points
-                    sd_seg_t seg1 = {seg.s, ns, len, seg.c, seg.x, seg.y};
-                    segs[ns] = seg1;
-                    if (ns == ms) {
-                        ms <<= 1;
-                        segs = (sd_seg_t *) realloc(segs, ms * sizeof(sd_seg_t));
-                    }
-                    ++ns;
+                    // add seg information
+                    sd_seg_t seg1 = {seg.s, ns++, len, len + gap, seg.c, seg.x, seg.y, seg.t, seg.r};
+                    kv_push(sd_seg_t, segs1, seg1);
                     len += seg.y;
                 } else {
                     l = (int64_t) p[0] - seg.a;
                     assert(-l < UINT32_MAX && l < UINT32_MAX);
                     if (l > 0) {
                         // split seg
-                        sd_seg_t seg1 = {seg.s, ns, len, seg.c, seg.c & 1? (uint32_t) (-l + seg.x + seg.y) : seg.x, (uint32_t) l};
-                        segs[ns] = seg1;
-                        ++ns;
+                        sd_seg_t seg1 = {seg.s, ns++, len, len + gap, seg.c,
+                            seg.c & 1? (uint32_t) (-l + seg.x + seg.y) : seg.x, (uint32_t) l, seg.t, seg.r};
+                        kv_push(sd_seg_t, segs1, seg1);
+                        len += l;
+                    } else {
+                        // remove gaps before seg
+                        while (gs.n > 0 && gs.a[gs.n - 1] == ns) {
+                            --gs.n;
+                            // no need to change size of gap info kvecs as they will be reset after this
+                            gap -= gsize.a[gs.n];
+                        }
                     }
 
-                    write_segs_to_agp(segs, ns, sd, ++s, fp);
+                    // add aseq info and write seg block
+                    aseq1.len = len;
+                    aseq1.gap = gap;
+                    aseq1.n = ns;
+                    aseq1.s = 0;
+                    aseq1.gn = gs.n;
+                    aseq1.gs = gs.a;
+                    aseq1.gsize = gsize.a;
+                    aseq1.gcomp = gcomp.a;
+                    aseq1.gtype = gtype.a;
+                    aseq1.glink = glink.a;
+                    aseq1.gevid = gevid.a;
+                    sprintf(&s_name[9], "%u", ++s);
+                    write_segs_to_agp(segs1.a, ns, &aseq1, sd, s_name, fp);
+                    // reset params
+                    len = gap = 0;
                     ns = 0;
-                    len = 0;
-                    if (--p_n)
-                        ++p;
+                    segs1.n = gs.n = gsize.n = gcomp.n = gtype.n = glink.n = gevid.n = 0;
+                    if (--p_n) ++p;
 
+                    // these are all single seg blocks
                     L = l;
                     while (p_n > 0 && seg.a + seg.y > p[0]) {
                         l = (int64_t) (p[0] - p[-1]);
                         assert(l < UINT32_MAX);
-                        sd_seg_t seg1 = {seg.s, ns, 0, seg.c, seg.c & 1? (uint32_t) (-L - l + seg.x + seg.y) : (uint32_t) (L + seg.x), (uint32_t) l};
-                        write_segs_to_agp(&seg1, 1, sd, ++s, fp);
+                        sd_seg_t seg1 = {seg.s, 0, 0, 0, seg.c, seg.c & 1? (uint32_t) (-L - l + seg.x + seg.y) : (uint32_t) (L + seg.x), 
+                            (uint32_t) l, seg.t, seg.r};
+                        // write a block of a single seg
+                        sprintf(&s_name[9], "%u", ++s);
+                        write_segs_to_agp(&seg1, 1, 0, sd, s_name, fp);
                         L += l;
-                        if (--p_n) 
-                            ++p;
+                        if (--p_n) ++p;
                     }
                     
                     assert(-L < UINT32_MAX && L < UINT32_MAX);
                     if (L < seg.y) {
-                        sd_seg_t seg1 = {seg.s, ns, 0, seg.c, seg.c & 1? seg.x : (uint32_t) (L + seg.x), (uint32_t) (-L + seg.y)};
+                        // make remnant as the first seg in the next block
+                        sd_seg_t seg1 = {seg.s, ns++, 0, 0, seg.c, seg.c & 1? seg.x : (uint32_t) (L + seg.x), (uint32_t) (-L + seg.y), 
+                            seg.t, seg.r};
+                        kv_push(sd_seg_t, segs1, seg1);
                         len += -L + seg.y;
-                        segs[ns] = seg1;
-                        ++ns;
+                    } else {
+                        // remove gaps after this seg
+                        while (g < aseq.gn && aseq.gs[g] <= j+1) ++g;
                     }
                 }
             }
             if (ns > 0) {
-                write_segs_to_agp(segs, ns, sd, ++s, fp);
-                ns = 0;
+                // add trailing gap information
+                while (g < aseq.gn) {
+                    kv_push(uint32_t, gs, ns);
+                    kv_push(uint32_t, gsize, aseq.gsize[g]);
+                    kv_push(uint32_t, gcomp, aseq.gcomp[g]);
+                    kv_push(uint32_t, gtype, aseq.gtype[g]);
+                    kv_push(uint32_t, glink, aseq.glink[g]);
+                    kv_push(uint32_t, gevid, aseq.gevid[g]);
+                    gap += aseq.gsize[g];
+                    ++g;
+                }
+                // add aseq info and write seg block
+                aseq1.len = len;
+                aseq1.gap = gap;
+                aseq1.n = ns;
+                aseq1.s = 0;
+                aseq1.gn = gs.n;
+                aseq1.gs = gs.a;
+                aseq1.gsize = gsize.a;
+                aseq1.gcomp = gcomp.a;
+                aseq1.gtype = gtype.a;
+                aseq1.glink = glink.a;
+                aseq1.gevid = gevid.a;
+                sprintf(&s_name[9], "%u", ++s);
+                write_segs_to_agp(segs1.a, ns, &aseq1, sd, s_name, fp);
             }
-            if(--b_n) 
-                ++breaks;
+            if(--b_n) ++breaks;
         }
     }
 
-    free(segs);
+    kv_destroy(segs1);
+    kv_destroy(gs);
+    kv_destroy(gsize);
+    kv_destroy(gcomp);
+    kv_destroy(gtype);
+    kv_destroy(glink);
+    kv_destroy(gevid);
 }
 

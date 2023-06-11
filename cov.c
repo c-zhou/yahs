@@ -202,6 +202,7 @@ cov_t *bam_cstats(const char *bam, sdict_t *sdict, int match_header)
             }
             continue;
         }
+        // BAM file coordinate is 0-based
         kv_push(uint64_t, covs->p[i], (uint64_t) b1->core.pos << 32 | (uint32_t) 1);
         kv_push(uint64_t, covs->p[i], (uint64_t) get_target_end(b1) << 32 | (uint32_t) -1);
         n += 2;
@@ -275,6 +276,7 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
             }
             continue;
         }
+        // BED file coordinate is 0-based
         kv_push(uint64_t, covs->p[i], (uint64_t) s << 32 | (uint32_t) 1);
         kv_push(uint64_t, covs->p[i], (uint64_t) e << 32 | (uint32_t) -1);
         n += 2;

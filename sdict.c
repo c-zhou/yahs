@@ -36,6 +36,7 @@
 #include "sdict.h"
 #include "ksort.h"
 #include "kseq.h"
+#include "kvec.h"
 
 #undef DEBUG_DICT
 
@@ -43,6 +44,12 @@ KSEQ_INIT(gzFile, gzread, gzseek)
 
 void *kopen(const char *fn, int *_fd);
 int kclose(void *a);
+
+AGP_CT_t DEFAULT_AGP_SEQ_COMPONENT_TYPE = AGP_CT_W;
+AGP_CT_t DEFAULT_AGP_GAP_COMPONENT_TYPE = AGP_CT_U;
+AGP_GT_t DEFAULT_AGP_GAP_TYPE = AGP_GT_SCAFFOLD;
+AGP_LE_t DEFAULT_AGP_LINKAGE_EVIDENCE = AGP_LE_PROXIMITY_LIGATION;
+int DEFAULT_AGP_GAP_SIZE = DEFAULT_AGP_U_GAP_SIZE;
 
 sdict_t *sd_init(void)
 {
@@ -66,7 +73,7 @@ asm_dict_t *asm_init(sdict_t *sdict)
     d->u = 0;
     d->v = 16;
     d->seg = (sd_seg_t *) malloc(d->v * sizeof(sd_seg_t));
-    d->a = (uint32_t *) malloc(sdict->n * sizeof(uint32_t));
+    d->a = (uint64_t *) malloc(sdict->n * sizeof(uint64_t));
     d->index = 0;
     d->sdict = sdict;
     return d;
@@ -96,8 +103,15 @@ void asm_destroy(asm_dict_t *d)
     if (d == 0)
         return;
     if (d->s) {
-        for (i = 0; i < d->n; ++i)
+        for (i = 0; i < d->n; ++i) {
             free(d->s[i].name);
+            free(d->s[i].gs);
+            free(d->s[i].gsize);
+            free(d->s[i].gcomp);
+            free(d->s[i].gtype);
+            free(d->s[i].glink);
+            free(d->s[i].gevid);
+        }
         free(d->s);
     }
     if (d->seg)
@@ -281,7 +295,16 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
     return d;
 }
 
-uint32_t asm_put(asm_dict_t *d, const char *name, uint64_t len, uint32_t n, uint32_t s)
+static inline void *memcpy1(const void *src, size_t count)
+{
+    if (count == 0) return 0;
+    void *dest = malloc(count);
+    memcpy(dest, src, count);
+    return dest;
+}
+
+uint32_t asm_put(asm_dict_t *d, const char *name, uint64_t len, uint64_t gap, uint32_t n, uint32_t s, uint32_t gn, 
+        uint32_t *gs, uint32_t *gsize, uint32_t *gcomp, uint32_t *gtype, uint32_t *glink, uint32_t *gevid)
 {
     if (!name) 
         return UINT32_MAX;
@@ -299,8 +322,16 @@ uint32_t asm_put(asm_dict_t *d, const char *name, uint64_t len, uint32_t n, uint
         }
         a = &d->s[d->n];
         a->len = len;
+        a->gap = gap;
         a->n = n;
         a->s = s;
+        a->gn = gn;
+        a->gs = memcpy1(gs, sizeof(uint32_t) * gn);
+        a->gsize = memcpy1(gsize, sizeof(uint32_t) * gn);
+        a->gcomp = memcpy1(gcomp, sizeof(uint32_t) * gn);
+        a->gtype = memcpy1(gtype, sizeof(uint32_t) * gn);
+        a->glink = memcpy1(glink, sizeof(uint32_t) * gn);
+        a->gevid = memcpy1(gevid, sizeof(uint32_t) * gn);
         kh_key(h, k) = a->name = strdup(name);
         kh_val(h, k) = d->n++;
     }
@@ -315,13 +346,14 @@ uint32_t asm_sd_get(asm_dict_t *d, const char *name)
     return k == kh_end(h)? UINT32_MAX : kh_val(h, k);
 }
 
-static void seg_put(asm_dict_t *d, uint32_t s, uint32_t k, uint64_t a, uint32_t c, uint32_t x, uint32_t y)
+void seg_put(asm_dict_t *d, uint32_t s, uint32_t k, uint64_t a, uint64_t b,
+        uint32_t c, uint32_t x, uint32_t y, uint32_t t, uint32_t r)
 {
     if (d->u == d->v) {
         d->v = d->v? d->v<<1 : 16;
         d->seg = (sd_seg_t *) realloc(d->seg, d->v * sizeof(sd_seg_t));
     }
-    sd_seg_t seg = {s, k, a, c, x, y};
+    sd_seg_t seg = {s, k, a, b, c, x, y, t, r};
     d->seg[d->u++] = seg;
 }
 
@@ -331,11 +363,11 @@ asm_dict_t *make_asm_dict_from_sdict(sdict_t *sdict)
     asm_dict_t *d;
     d = asm_init(sdict);
     d->index = (uint64_t *) calloc(sdict->n, sizeof(uint64_t));
-    uint32_t *a = d->a;
+    uint64_t *a = d->a;
     for (i = 0; i < sdict->n; ++i) {
-        asm_put(d, sdict->s[i].name, sdict->s[i].len, 1, i);
-        seg_put(d, i, 0, 0, i<<1, 0, sdict->s[i].len);
-        a[i] = i;
+        asm_put(d, sdict->s[i].name, sdict->s[i].len, 0, 1, i, 0, 0, 0, 0, 0, 0, 0);
+        seg_put(d, i, 0, 0, 0, i<<1, 0, sdict->s[i].len, DEFAULT_AGP_SEQ_COMPONENT_TYPE, AGP_OT_PLUS);
+        a[i] = (uint64_t) i << 32 | 1;
         d->index[i] = (uint64_t) sdict->s[i].len << 32 | i;
     }
     return d;
@@ -348,23 +380,19 @@ KRADIX_SORT_INIT(pair, c_pair_t, pair_key, 8)
 
 void asm_index(asm_dict_t *d)
 {
-    int32_t i, s, c, c1;
+    int32_t i, s, c;
+    uint64_t *a, last;
     sd_seg_t seg;
-    uint64_t x, y;
-    uint32_t *a;
 
-    s = 0;
-    for (i = 0; i < d->n; ++i)
-        s += d->s[i].n;
-    
+    s = d->u;
+    if (s == 0) return;
+
     c_pair_t *c_pairs;
     c_pairs = (c_pair_t *) malloc(s * sizeof(c_pair_t));
     for(i = 0; i < s; ++i) {
         seg = d->seg[i];
-        x = (uint64_t) seg.c >> 1 << 32 | (seg.x + seg.y);
-        y = (uint64_t) (seg.x + seg.y) << 32 | i;
-        c_pair_t pair = {x, y};
-        c_pairs[i] = pair;
+        c_pairs[i].x = (uint64_t) seg.c >> 1 << 32 | (seg.x + seg.y);
+        c_pairs[i].y = (uint64_t) (seg.x + seg.y) << 32 | i;
     }
 
     radix_sort_pair(c_pairs, c_pairs + s);
@@ -373,31 +401,34 @@ void asm_index(asm_dict_t *d)
         free(d->index);
     d->index = (uint64_t *) malloc(s * sizeof(uint64_t));
     a = d->a;
-    memset(a, 0xff, sizeof(uint32_t) * d->sdict->n);
-    c1 = UINT32_MAX;
-    for (i = 0; i < s; ++i) {
+    memset(a, 0, sizeof(uint64_t) * d->sdict->n);
+    d->index[0] = c_pairs[0].y;
+    c = c_pairs[0].x >> 32;
+    for (i = 1, last = 0; i < s; ++i) {
         d->index[i] = c_pairs[i].y;
-        c = c_pairs[i].x >> 32;
-        if (c != c1) {
-            a[c] = i;
-            c1 = c;
+        if (c != c_pairs[i].x >> 32) {
+            a[c] = last << 32 | (i - last);
+            last = i;
+            c = c_pairs[i].x >> 32;
         }
     }
+    a[c] = last << 32 | (i - last);
 
     free(c_pairs);
 }
 
-asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
+asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unknown_oris)
 {
     FILE *fp;
     char *line = NULL;
     size_t ln = 0;
     ssize_t read;
-    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[4];
+    char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[64];
     char *name = NULL;
-    uint64_t a;
-    uint32_t l, cstart, cend;
+    uint64_t a, b;
+    uint32_t l, cstart, cend, ctype, coris;
     uint32_t c, s, n;
+    kvec_t(uint32_t) gs, gsize, gcomp, gtype, glink, gevid;
 
     fp = fopen(f, "r");
     if (fp == NULL) {
@@ -406,24 +437,53 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
     }
 
     asm_dict_t *d;
+    sd_seq_t *sd;
     d = asm_init(sdict);
-    a = 0;
+    a = b = 0;
     s = n = 0;
+    kv_init(gs);
+    kv_init(gsize);
+    kv_init(gcomp);
+    kv_init(gtype);
+    kv_init(glink);
+    kv_init(gevid);
     while ((read = getline(&line, &ln, fp)) != -1) {
         if (is_empty_line(line) || !strncmp(line, "#", 1))
             // header or empty lines
             continue;
+        
         sscanf(line, "%s %*s %*s %*s %s %s %s %s %s", sname, type, cname, cstarts, cends, oris);
-        if (!strncmp(type, "N", 1))
-            continue;
         if (!name)
             name = strdup(sname);
         if (strcmp(sname, name)) {
-            asm_put(d, name, a, n, s - n);
+            asm_put(d, name, a, b - a, n, s - n, gs.n, gs.a, gsize.a, gcomp.a, gtype.a, glink.a, gevid.a);
             a = 0;
+            b = 0;
             n = 0;
+            gs.n = 0;
+            gsize.n = 0;
+            gtype.n = 0;
+            glink.n = 0;
+            gevid.n = 0;
+            free(name);
             name = strdup(sname);
         }
+
+        ctype = agp_component_type_key(type);
+        if (ctype == AGP_CT_N || ctype == AGP_CT_U) {
+            // gap
+            kv_push(uint32_t, gs, n);
+            kv_push(uint32_t, gcomp, ctype);
+            c = strtoul(cname, NULL, 10); kv_push(uint32_t, gsize, c);
+            if (ctype == AGP_CT_U && c != DEFAULT_AGP_U_GAP_SIZE)
+                fprintf(stderr, "[W::%s] type 'U' gap size is not %d\n", __func__, DEFAULT_AGP_U_GAP_SIZE);
+            b += c;
+            c = agp_gap_type_key(cstarts); kv_push(uint32_t, gtype, c);
+            c = agp_linkage_key(cends); kv_push(uint32_t, glink, c);
+            c = agp_linkage_evidence_key(oris); kv_push(uint32_t, gevid, c);
+            continue;
+        }
+
         cstart = strtoul(cstarts, NULL, 10);
         cend = strtoul(cends, NULL, 10);
         c = sd_get(sdict, cname);
@@ -431,16 +491,35 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
             fprintf(stderr, "[E::%s] sequence %s not found\n", __func__, cname);
             return 0;
         }
+        sd = &sdict->s[c];
+        if (cstart < 1 || cstart > cend || cend > sd->len) {
+            fprintf(stderr, "[E::%s] invalid sequence component %s:%u-%u on %s\n", __func__, cname, cstart, cend, sname);
+            if (cend > sd->len)
+                fprintf(stderr, "[E::%s] sequence end position (%u) greater than sequence length (%u)\n", __func__, cend, sd->len);
+            exit(EXIT_FAILURE);
+        }
+        coris = agp_orientation_key(oris);
+        if (!allow_unknown_oris && coris != AGP_OT_PLUS && coris != AGP_OT_MINUS) {
+            // unknown orientation is not allowed
+            fprintf(stderr, "[E::%s] unknown orientation of sequence component %s:%u-%u on %s: '%s'\n", __func__, cname, cstart, cend, sname, oris);
+            if (allow_unknown_oris) {
+                fprintf(stderr, "[E::%s] valid identifiers for unorientated sequence include: '?', '0' and 'na'\n", __func__);
+                fprintf(stderr, "[E::%s] see %s\n", __func__, AGP_SPEC_ONLINE_DOC);
+            } else {
+                fprintf(stderr, "[E::%s] run program with '-u' option to include sequence components\n", __func__);
+            }
+            exit(EXIT_FAILURE);
+        }
         c <<= 1;
-        if (strncmp(oris, "+", 1)) 
-            c |= 1;
+        if (coris == AGP_OT_MINUS) c |= 1;
         l = cend - cstart + 1;
-        seg_put(d, d->n, n, a, c, cstart - 1, l);
+        seg_put(d, d->n, n, a, b, c, cstart - 1, l, ctype, coris);
         a += l;
+        b += l;
         ++s;
         ++n;
     }
-    asm_put(d, name, a, n, s - n);
+    asm_put(d, name, a, b - a, n, s - n, gs.n, gs.a, gsize.a, gcomp.a, gtype.a, glink.a, gevid.a);
     d->sdict = sdict;
 #ifdef DEBUG_DICT
     for (int i = 0; i < s; ++i)
@@ -455,7 +534,13 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f)
         free(line);
     if (name)
         free(name);
-    
+    kv_destroy(gs);
+    kv_destroy(gsize);
+    kv_destroy(gcomp);
+    kv_destroy(gtype);
+    kv_destroy(glink);
+    kv_destroy(gevid);
+
     return d;
 }
 
@@ -468,77 +553,77 @@ void add_unplaced_short_seqs(asm_dict_t *d, uint32_t min_len)
     for (i = 0; i < sdict->n; ++i) {
         if (sdict->s[i].len >= min_len)
             continue;
-        seg_put(d, d->n, 0, 0, i<<1, 0, sdict->s[i].len);
-        asm_put(d, sdict->s[i].name, sdict->s[i].len, 1, d->u - 1);
+        seg_put(d, d->n, 0, 0, 0, i<<1, 0, sdict->s[i].len, DEFAULT_AGP_SEQ_COMPONENT_TYPE, AGP_OT_PLUS);
+        asm_put(d, sdict->s[i].name, sdict->s[i].len, 0, 1, d->u - 1, 0, 0, 0, 0, 0, 0, 0);
     }
     asm_index(d);
 }
 
-
 /* contig coordinates to scaffold coordinates */
-// one-based
+// 0-based
 int sd_coordinate_conversion(asm_dict_t *d, uint32_t id, uint32_t pos, uint32_t *s, uint64_t *p, int count_gap)
 {
     *s = UINT32_MAX;
     *p = UINT64_MAX;
 
-    if (id == UINT32_MAX)
-        return 1;
+    if (id >= d->sdict->n)
+        return SEQ_NOT_FOUND;
 
-    uint32_t i;
+    uint32_t i, n;
     uint64_t *index = d->index;
-    i = d->a[id];
-    if (i == UINT32_MAX)
-        return 1;
+    i = (uint32_t) (d->a[id] >> 32);
+    n = (uint32_t) (d->a[id]) + i;
 
-    while (index[i]>>32 < pos) 
+    while (i < n && index[i]>>32 <= pos)
         ++i;
-    sd_seg_t seg = d->seg[(uint32_t) index[i]];
-    if (pos < seg.x)
-        return 1;
+    if (i == n)
+        return POS_NOT_IN_RANGE;
 
-    *s = seg.s;
-    *p = seg.c & 1? seg.a + seg.x + seg.y - pos + 1 : seg.a + pos - seg.x;
-    if (count_gap)
-        *p = *p + seg.k * GAP_SZ;
+    sd_seg_t *seg = &d->seg[(uint32_t) index[i]];
+    if (pos < seg->x || pos >= seg->x + seg->y)
+        return POS_NOT_IN_RANGE;
 
-    return 0;
+    uint64_t offset = count_gap? seg->b : seg->a;
+    *s = seg->s;
+    *p = seg->c & 1? offset + seg->x + seg->y - 1 - pos : offset + pos - seg->x;
+
+    return CC_SUCCESS;
 }
 
 /* scaffold coordinates to contig coordinates */
-// one-based
+// 0-based
 int sd_coordinate_rev_conversion(asm_dict_t *d, uint32_t id, uint64_t pos, uint32_t *s, uint32_t *p, int count_gap)
 {
     *s = UINT32_MAX;
     *p = UINT32_MAX;
 
-    if (id == UINT32_MAX)
-        return 1;    
+    if (id >= d->n)
+        return SEQ_NOT_FOUND;
 
     sd_seg_t *seg = d->seg + d->s[id].s;
-    uint32_t n = d->s[id].n;
-    int64_t l = pos;
+    uint32_t i = 0, n = d->s[id].n;
+    uint64_t offset = 0;
 
-    uint32_t i = 0;
-    int in_gap = 0;
-    while (i < n && l > 0) {
-        l -= seg[i].y;
-        in_gap = 0;
-        ++i;
-        if (count_gap && i < n && l > 0) {
-            l -= GAP_SZ;
-            in_gap = 1;
-        }
+    if (count_gap) {
+        while (i < n && pos >= seg[i].b)
+            ++i;
+        seg = &seg[i-1];
+        offset = pos - seg->b;
+    } else {
+        while (i < n && pos >= seg[i].a)
+            ++i;
+        seg = &seg[i-1];
+        offset = pos - seg->a;
     }
     
-    if (l > 0 || in_gap)
-        return 1;
+    // check if in gap or exceeds seq length
+    if (offset >= seg->y)
+        return POS_NOT_IN_RANGE;
 
-    --i;
-    *s = seg[i].c >> 1;
-    *p = seg[i].c & 1? seg[i].x - l + 1 : seg[i].x + seg[i].y + l;
+    *s = seg->c >> 1;
+    *p = seg->c & 1? seg->y - 1 - offset : seg->x + offset;
 
-    return 0;
+    return CC_SUCCESS;
 }
 
 int cmp_uint64_d (const void *a, const void *b) {
@@ -625,7 +710,10 @@ char nucl_toupper[] = {
     'N', 'N', 'N', 'N', 'T', 'N', 'N', 'N', 'N', 'N', 'N', 123, 124, 125, 126, 127
 };
 
-void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd, int un_oris)
+
+// deprecated
+// this can now be done in two steps: first read AGP file to an assembly dictionary and then write to a FASTA file
+void _write_fasta_file_from_agp_(const char *fa, const char *agp, FILE *fo, int line_wd, int allow_unknown_oris)
 {
     FILE *agp_in;
     char *line = NULL;
@@ -691,7 +779,7 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
                 fprintf(stderr, "[E::%s] sequence end position (%ld) greater than sequence length (%u)\n", __func__, cend, s.len);
             exit(EXIT_FAILURE);
         }
-        if (!strncmp(oris, "+", 1) || (un_oris && (!strncmp(oris, "?", 1) || !strncmp(oris, "0", 1) || !strncmp(oris, "na", 2)))) {
+        if (!strncmp(oris, "+", 1) || (allow_unknown_oris && (!strncmp(oris, "?", 1) || !strncmp(oris, "0", 1) || !strncmp(oris, "na", 2)))) {
             // forward
             for (i = cstart - 1; i < cend; ++i) {
                 fputc(s.seq[i], fo);
@@ -707,9 +795,9 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
             }
         } else {
             fprintf(stderr, "[E::%s] unknown orientation of sequence component %s:%ld-%ld on %s: '%s'\n", __func__, cname, cstart, cend, sname, oris);
-            if (un_oris) {
+            if (allow_unknown_oris) {
                 fprintf(stderr, "[E::%s] valid identifiers for unorientated sequence include: '?', '0' and 'na'\n", __func__);
-                fprintf(stderr, "[E::%s] see https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification/#FORMAT\n", __func__);
+                fprintf(stderr, "[E::%s] see %s\n", __func__, AGP_SPEC_ONLINE_DOC);
             }
             exit(EXIT_FAILURE);
         }
@@ -724,26 +812,100 @@ void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int li
     if (line)
         free(line);
     free(name);
-    free(dict);
-
     fclose(agp_in);
+    sd_destroy(dict);
 }
 
-void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sdict_t *sd, uint32_t s, FILE *fp)
+static inline void write_agp_seq(FILE *fo, char *s_name, uint64_t s_beg, uint64_t s_end, uint32_t b, 
+        uint32_t ctype, char *c_name, uint32_t c_beg, uint32_t c_end, uint32_t c_oris)
+{
+    fprintf(fo, "%s\t%lu\t%lu\t%d\t%s\t%s\t%u\t%u\t%s\n", s_name, s_beg, s_end, b, 
+            agp_component_type_val(ctype), c_name, c_beg, c_end, agp_orientation_val(c_oris));
+}
+
+static inline void write_agp_gap(FILE *fo, char *s_name, uint64_t s_beg, uint64_t s_end, uint32_t b, 
+        uint32_t gcomp, uint32_t gsize, uint32_t gtype, uint32_t glink, uint32_t gevid)
+{
+    fprintf(fo, "%s\t%lu\t%lu\t%d\t%s\t%d\t%s\t%s\t%s\n", s_name, s_beg, s_end, b, 
+            agp_component_type_val(gcomp), gsize, agp_gap_type_val(gtype), 
+            agp_linkage_val(glink), agp_linkage_evidence_val(gevid));
+}
+
+void write_segs_to_agp(sd_seg_t *segs, uint32_t n, sd_aseq_t *aseq, sdict_t *sd, char *name, FILE *fo)
 {
     uint64_t len;
     sd_seg_t seg;
-    uint32_t i, t;
+    uint32_t i, j, t;
     len = 0;
     t = 0;
-    for (i = 0; i < n; ++i) {
-        seg = segs[i];
-        fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + seg.y, ++t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
-        len += seg.y;
-        if (i != n - 1) {
-            fprintf(fp, "scaffold_%u\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\t%s\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
-            len += GAP_SZ;
+    if (!name) name = aseq? aseq->name : 0;
+    if (!name) {
+        fprintf(stderr, "[E::%s] sequence name required\n", __func__);
+        exit(EXIT_FAILURE);
+    } 
+    if (aseq) {
+        // with gap information
+        for (i = 0, j = 0; i < n; ++i) {
+            seg = segs[i];
+            while (j < aseq->gn && aseq->gs[j] <= i) {
+                // print gap
+                write_agp_gap(fo, name, len + 1, len + aseq->gsize[j], ++t, aseq->gcomp[j], aseq->gsize[j], 
+                        aseq->gtype[j], aseq->glink[j], aseq->gevid[j]);
+                len += aseq->gsize[j];
+                ++j;
+            }
+            write_agp_seq(fo, name, seg.b + 1, seg.b + seg.y, ++t, seg.t, sd->s[seg.c >> 1].name, 
+                    seg.x + 1, seg.x + seg.y, seg.r);
+            len += seg.y;
         }
+        while (j < aseq->gn) {
+            // print trailing gap
+            write_agp_gap(fo, name, len + 1, len + aseq->gsize[j], ++t, aseq->gcomp[j], aseq->gsize[j], 
+                    aseq->gtype[j], aseq->glink[j], aseq->gevid[j]);
+            len += aseq->gsize[j];
+            ++j;
+        }
+        if (len != aseq->len + aseq->gap) {
+            fprintf(stderr, "[E::%s] sequence length conflict: %lu %lu\n", __func__, len, aseq->len + aseq->gap);
+            //exit(EXIT_FAILURE);
+        }
+    } else {
+        // no gap information provided
+        // using default settings
+        for (i = 0; i < n; ++i) {
+            seg = segs[i];
+            write_agp_seq(fo, name, len + 1, len + seg.y, ++t, seg.t, sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, seg.r);
+            /***
+            fprintf(fo, "%s\t%lu\t%lu\t%d\t%s\t%s\t%u\t%u\t%s\n", 
+                    name, len + 1, len + seg.y, ++t,
+                    agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE),
+                    sd->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y,
+                    seg.c & 1? agp_orientation_val(AGP_OT_MINUS) : agp_orientation_val(AGP_OT_PLUS));
+            **/
+            len += seg.y;
+            if (i != n - 1) {
+                write_agp_gap(fo, name, len + 1, len + DEFAULT_AGP_GAP_SIZE, ++t, DEFAULT_AGP_GAP_COMPONENT_TYPE, 
+                        DEFAULT_AGP_GAP_SIZE, DEFAULT_AGP_GAP_TYPE, AGP_LG_YES, DEFAULT_AGP_LINKAGE_EVIDENCE);
+                /***
+                fprintf(fo, "%s\t%lu\t%lu\t%d\t%s\t%d\t%s\t%s\t%s\n", 
+                        name, len + 1, len + DEFAULT_AGP_GAP_SIZE, ++t,
+                        agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE), 
+                        DEFAULT_AGP_GAP_SIZE,
+                        agp_gap_type_val(DEFAULT_AGP_GAP_TYPE),
+                        agp_linkage_val(AGP_LG_YES),
+                        agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+                **/
+                len += DEFAULT_AGP_GAP_SIZE;
+            }
+        }
+    }
+}
+
+void write_asm_dict_to_agp(asm_dict_t *dict, FILE *fo)
+{
+    uint32_t i;
+    for (i = 0; i < dict->n; ++i) {
+        write_segs_to_agp(dict->seg + dict->s[i].s, dict->s[i].n, &dict->s[i], dict->sdict, 0, fo);
     }
 }
 
@@ -751,6 +913,7 @@ void write_sorted_agp(asm_dict_t *dict, FILE *fo)
 {
     int i, j;
     uint32_t s;
+    char s_name[32];
     c_pair_t *c_pairs;
 
     c_pairs = (c_pair_t *) malloc(dict->n * sizeof(c_pair_t));
@@ -762,55 +925,139 @@ void write_sorted_agp(asm_dict_t *dict, FILE *fo)
     s = 0;
     for (i = dict->n - 1; i >= 0; --i) {
         j = c_pairs[i].y;
-        write_segs_to_agp(dict->seg + dict->s[j].s, dict->s[j].n, dict->sdict, ++s, fo);
+        sprintf(s_name, "scaffold_%u", ++s);
+        write_segs_to_agp(dict->seg + dict->s[j].s, dict->s[j].n, &dict->s[j], dict->sdict, s_name, fo);
     }
     free(c_pairs);
 }
 
-void write_sdict_to_agp(sdict_t *sdict, char *out)
+void write_sdict_to_agp(sdict_t *sdict, FILE *fo)
 {
     int i;
-    FILE *agp_out;
-    agp_out = fopen(out, "w");
-    if (agp_out == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
-        exit(EXIT_FAILURE);
-    }
-
     for (i = 0; i < sdict->n; ++i)
-        fprintf(agp_out, "scaffold_%u\t1\t%u\t1\tW\t%s\t1\t%u\t+\n", i + 1, sdict->s[i].len, sdict->s[i].name, sdict->s[i].len);
-    fclose(agp_out);
+        fprintf(fo, "scaffold_%u\t1\t%u\t1\t%s\t%s\t1\t%u\t+\n", i + 1, sdict->s[i].len, 
+                agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE), sdict->s[i].name, sdict->s[i].len);
 }
 
-void write_asm_dict_to_agp(asm_dict_t *dict, char *out)
+uint64_t write_segs_to_fasta(sd_seg_t *segs, uint32_t n, sd_aseq_t *aseq, sdict_t *sd, char *name, int line_wd, FILE *fo)
 {
-    uint64_t len = 0;
+    uint32_t i, j;
+    uint64_t l, len;
+    int64_t k, m;
     sd_seg_t seg;
-    uint32_t i, j, n, s, t;
-    FILE *agp_out;
-    agp_out = fopen(out, "w");
-    if (agp_out == NULL) {
-        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
+    char *s;
+    if (!name) name = aseq? aseq->name : 0;
+    if (!name) {
+        fprintf(stderr, "[E::%s] sequence name required\n", __func__);
         exit(EXIT_FAILURE);
     }
-
-    for (i = 0; i < dict->n; ++i) {
-        len = 0;
-        t = 0;
-        s = dict->s[i].s;
-        n = dict->s[i].n;
-        for (j = 0; j < n; ++j) {
-            seg = dict->seg[s + j];
-            fprintf(agp_out, "%s\t%lu\t%lu\t%u\tW\t%s\t%u\t%u\t%c\n", dict->s[i].name, len + 1, len + seg.y, ++t, dict->sdict->s[seg.c >> 1].name, seg.x + 1, seg.x + seg.y, "+-"[seg.c & 1]);
+    fprintf(fo, ">%s\n", name);
+    l = len = 0;
+    if (aseq) {
+        // with gap information
+        for (i = 0, j = 0; i < n; ++i) {
+            while (j < aseq->gn && aseq->gs[j] <= i) {
+                // print gap
+                for (k = 0, m = aseq->gsize[j]; k < m; ++k) {
+                    fputc('N', fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+                len += m;
+                ++j;
+            }
+            seg = segs[i];
+            s = sd->s[seg.c >> 1].seq;
+            if ((seg.c&1) == 0) {
+                // forward
+                for (k = seg.x, m = seg.x + seg.y; k < m; ++k) {
+                    fputc(s[k], fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+            } else {
+                // reverse
+                for (k = seg.x + seg.y - 1, m = seg.x; k >= m; --k) {
+                    fputc(comp_table[(int) s[k]], fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+            }
             len += seg.y;
-            if (j != n - 1) {
-                fprintf(agp_out, "%s\t%lu\t%lu\t%d\tN\t%d\tscaffold\tyes\t%s\n", dict->s[i].name, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
-                len += GAP_SZ;
+        }
+        while (j < aseq->gn) {
+            // print trailing gap
+            for (k = 0, m = aseq->gsize[j]; k < m; ++k) {
+                fputc('N', fo);
+                if (++l % line_wd == 0)
+                    fputc('\n', fo);
+            }
+            len += m;
+            ++j;
+        }
+        if (len != aseq->len + aseq->gap) {
+            fprintf(stderr, "[E::%s] sequence length conflict\n", __func__);
+            exit(EXIT_FAILURE);
+        }
+    } else {
+        // no gap information provided
+        // using default settings
+        for (i = 0; i < n; ++i) {
+            seg = segs[i];
+            s = sd->s[seg.c >> 1].seq;
+            if ((seg.c&1) == 0) {
+                // forward
+                for (k = seg.x, m = seg.x + seg.y; k < m; ++k) {
+                    fputc(s[k], fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+            } else {
+                // reverse
+                for (k = seg.x + seg.y - 1, m = seg.x; k >= m; --k) {
+                    fputc(comp_table[(int) s[k]], fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+            }
+            len += seg.y;
+            
+            if (i != n - 1) {
+                for (k = 0, m = DEFAULT_AGP_GAP_SIZE; k < m; ++k) {
+                    fputc('N', fo);
+                    if (++l % line_wd == 0)
+                        fputc('\n', fo);
+                }
+                len += m;
             }
         }
     }
-        
-    fclose(agp_out);
+
+    if (l % line_wd != 0)
+        fputc('\n', fo);
+    
+    return len;
+}
+
+uint64_t write_asm_dict_to_fasta(asm_dict_t *dict, int line_wd, FILE *fo)
+{
+    uint32_t i;
+    uint64_t len = 0;
+    for (i = 0; i < dict->n; ++i)
+        len += write_segs_to_fasta(dict->seg + dict->s[i].s, dict->s[i].n, 
+                &dict->s[i], dict->sdict, 0, line_wd, fo);
+    return len;
+}
+
+void write_fasta_file_from_agp(const char *fa, const char *agp, FILE *fo, int line_wd, int allow_unknown_oris)
+{
+    sdict_t *sdict = make_sdict_from_fa(fa, 0);
+    asm_dict_t *dict = make_asm_dict_from_agp(sdict, agp, allow_unknown_oris);
+    uint64_t len = write_asm_dict_to_fasta(dict, line_wd, fo);
+    fprintf(stderr, "[I::%s] Number sequences: %u\n", __func__, dict->n);
+    fprintf(stderr, "[I::%s] Number bases: %lu\n", __func__, len);
+    asm_destroy(dict);
+    sd_destroy(sdict);
 }
 
 uint64_t write_sequence_dictionary(FILE *fo, sdict_t *dict)

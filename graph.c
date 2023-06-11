@@ -32,6 +32,7 @@
 
 #include "ksort.h"
 #include "kdq.h"
+#include "kvec.h"
 #include "graph.h"
 #include "asset.h"
 
@@ -722,39 +723,34 @@ int trim_graph_ambiguous_edges(graph_t *g)
     return n_del;
 }
 
-int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
+asm_dict_t *make_asm_dict_from_graph(graph_t *graph, asm_dict_t *dict)
 {
-    uint32_t i, j, r, qs, v, nv, na, s;
-    uint64_t len;
+    uint32_t i, j, k, r, s, g, v, p, qs, nv, na, ns, nseg, ori;
+    int step;
+    uint64_t len, gap;
     graph_arc_t *av;
     kdq_t(uint32_t) *q;
+    asm_dict_t *d;
+    uint8_t *visited;
+    sdict_t *sd;
+    sd_aseq_t aseq;
+    sd_seg_t cseg;
+    char s_name[32];
+    kvec_t(uint32_t) gs, gsize, gcomp, gtype, glink, gevid;
 
-    nv = graph_n_vtx(g);
+    sprintf(s_name, "scaffold_");
+    kv_init(gs);
+    kv_init(gsize);
+    kv_init(gcomp);
+    kv_init(gtype);
+    kv_init(glink);
+    kv_init(gevid);
+    sd = dict->sdict;
+    d = asm_init(sd);
+    nv = graph_n_vtx(graph);
     nv <<= 1;
     q = kdq_init(uint32_t);
-    uint8_t *visited = calloc(nv, sizeof(uint8_t));
-    sdict_t *sd = dict->sdict;
-    sd_seg_t cseg;
-    uint32_t nseg;
-    int pst, step, k, t;
-    uint32_t ori;
-    FILE *agp_out;
-
-    if (out) {
-        char *agp_out_name = (char *) malloc(strlen(out) + 5);
-        sprintf(agp_out_name, "%s.agp", out);
-        agp_out = fopen(agp_out_name, "w");
-        free(agp_out_name);
-    } else {
-        agp_out = fopen("scaffolds_FINAL.agp", "w");
-    }
-
-    if (agp_out == NULL) {
-        fprintf(stderr, "[E::%s] fail to open file to write\n", __func__);
-        return 0;
-    }
-
-
+    visited = calloc(nv, sizeof(uint8_t));
     s = 0;
     for (r = 0; r < 2; ++r) {
         // second visit for circles
@@ -762,7 +758,7 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
             if (visited[i]) 
                 continue;
 
-            na = graph_arc_n(g, i);
+            na = graph_arc_n(graph, i);
             if (!na || r) {
                 v = i^1; // v is either a path source or a singleton
                 kdq_clean(q);
@@ -771,8 +767,8 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
                         break; //circle
                     kdq_push(uint32_t, q, v);
                     visited[v] = visited[v^1] = 1;
-                    na = graph_arc_n(g, v);
-                    av = graph_arc_a(g, v);
+                    na = graph_arc_n(graph, v);
+                    av = graph_arc_a(graph, v);
                     assert(na < 2);
                     if (!na) 
                         break;
@@ -782,39 +778,84 @@ int search_graph_path(graph_t *g, asm_dict_t *dict, char *out)
                 // write files
                 qs = kdq_size(q);
                 if (qs) {
-                    ++s;
-                    len = 0;
-                    t = 0;
+                    len = gap = 0;
+                    ns = 0;
                     for (j = 0; j < qs; ++j) {
                         v = kdq_at(q, j);
-                        nseg = dict->s[v>>1].n;
+                        aseq = dict->s[v>>1];
+                        nseg = aseq.n;
                         ori = v&1;
                         if (ori) {
-                            pst = dict->s[v>>1].s + nseg - 1;
+                            p = nseg - 1;
+                            g = aseq.gn - 1;
                             step = -1;
                         } else {
-                            pst = dict->s[v>>1].s;
+                            p = 0;
+                            g = 0;
                             step = 1;
                         }
                         for (k = 0; k < nseg; ++k) {
-                            cseg = dict->seg[pst + step * k];
-                            fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tW\t%s\t%u\t%u\t%c\n", s, len + 1, len + cseg.y, ++t, sd->s[cseg.c >> 1].name, cseg.x + 1, cseg.x + cseg.y, "+-"[(cseg.c & 1) ^ ori]);
-                            len += cseg.y;
-                            if (k != nseg - 1 || j != qs - 1) {
-                                fprintf(agp_out, "scaffold_%u\t%lu\t%lu\t%u\tN\t%d\tscaffold\tyes\t%s\n", s, len + 1, len + GAP_SZ, ++t, GAP_SZ, LINK_EVIDENCE);
-                                len += GAP_SZ;
+                            // add gap info
+                            while (g != (uint32_t) -1 && g < aseq.gn && 
+                                    (ori? aseq.gs[g] > p : aseq.gs[g] <= p)) {
+                                kv_push(uint32_t, gs, ns);
+                                kv_push(uint32_t, gsize, aseq.gsize[g]);
+                                kv_push(uint32_t, gcomp, aseq.gcomp[g]);
+                                kv_push(uint32_t, gtype, aseq.gtype[g]);
+                                kv_push(uint32_t, glink, aseq.glink[g]);
+                                kv_push(uint32_t, gevid, aseq.gevid[g]);
+                                gap += aseq.gsize[g];
+                                g += step;
                             }
+                            // add seg
+                            cseg = dict->seg[aseq.s + p];
+                            seg_put(d, d->n, ns++, len, len + gap, cseg.c^ori, cseg.x, cseg.y, cseg.t,
+                                    ori? agp_orientation_rev(cseg.r) : cseg.r);
+                            len += cseg.y;
+                            p += step;
+                        }
+
+                        while (g != (uint32_t) -1 && g < aseq.gn) {
+                            kv_push(uint32_t, gs, ns);
+                            kv_push(uint32_t, gsize, aseq.gsize[g]);
+                            kv_push(uint32_t, gcomp, aseq.gcomp[g]);
+                            kv_push(uint32_t, gtype, aseq.gtype[g]);
+                            kv_push(uint32_t, glink, aseq.glink[g]);
+                            kv_push(uint32_t, gevid, aseq.gevid[g]);
+                            gap += aseq.gsize[g];
+                            g += step;
+                        }
+
+                        if (j < qs - 1) {
+                            kv_push(uint32_t, gs, ns);
+                            kv_push(uint32_t, gsize, DEFAULT_AGP_GAP_SIZE);
+                            kv_push(uint32_t, gcomp, DEFAULT_AGP_GAP_COMPONENT_TYPE);
+                            kv_push(uint32_t, gtype, DEFAULT_AGP_GAP_TYPE);
+                            kv_push(uint32_t, glink, AGP_LG_YES);
+                            kv_push(uint32_t, gevid, DEFAULT_AGP_LINKAGE_EVIDENCE);
+                            gap += DEFAULT_AGP_GAP_SIZE;
                         }
                     }
+                    sprintf(&s_name[9], "%u", ++s);
+                    asm_put(d, s_name, len, gap, ns, d->u - ns, gs.n, gs.a, gsize.a, gcomp.a, gtype.a, glink.a, gevid.a);
+                    gs.n = gsize.n = gcomp.n = gtype.n = glink.n = gevid.n = 0;
                 }
             }
         }
     }
-    kdq_destroy(uint32_t, q);
-    
-    fclose(agp_out);
 
-    return 0;
+    free(visited);
+    kdq_destroy(uint32_t, q);
+    kv_destroy(gs);
+    kv_destroy(gsize);
+    kv_destroy(gcomp);
+    kv_destroy(gtype);
+    kv_destroy(glink);
+    kv_destroy(gevid);
+
+    asm_index(d);
+
+    return d;
 }
 
 

@@ -71,7 +71,7 @@ int u32_cmp(const void *p, const void *q)
     uint32_t a, b;
     a = *(uint32_t *) p;
     b = *(uint32_t *) q;
-    return a == b? 0 : (a > b? 1 : -1);
+    return (a > b) - (a < b);
 }
 
 re_cuts_t *find_re_from_seqs(const char *f, uint32_t ml, char **enz_cs, int enz_n)
@@ -170,7 +170,7 @@ double **calc_re_cuts_density(re_cuts_t *re_cuts, uint32_t resolution)
         b = div_ceil(re.l, resolution);
         ds = (double *) calloc(b, sizeof(double));
         for (j = 0; j < re.n; ++j)
-            ds[(MAX(re.sites[j], 1) - 1) / resolution] += 1.;
+            ds[re.sites[j] / resolution] += 1.;
         for (j = 0; j < b - 1; ++j)
             ds[j] /= (double) resolution * re_cuts->density;
         ds[b - 1] /= ((double) re.l - (double) (b - 1) * resolution) * re_cuts->density;
@@ -234,12 +234,12 @@ double **calc_re_cuts_density1(re_cuts_t *re_cuts, uint32_t resolution, asm_dict
             if (seg.c & 1) {
                 // reverse complement
                 while (a < re.n && re.sites[a] < e) {
-                    ds[(MAX(seg.a + seg.y - (re.sites[a] - seg.x), 1) - 1) / resolution] += 1.;
+                    ds[(seg.a + (seg.y - 1) - (re.sites[a] - seg.x)) / resolution] += 1.;
                     ++a;
                 }
             } else {
                 while (a < re.n && re.sites[a] < e) {
-                    ds[(MAX(seg.a + re.sites[a] - seg.x, 1) - 1) / resolution] += 1.;
+                    ds[(seg.a + re.sites[a] - seg.x) / resolution] += 1.;
                     ++a;
                 }
             }
@@ -293,20 +293,20 @@ double **calc_re_cuts_density2(re_cuts_t *re_cuts, uint32_t resolution, asm_dict
             if (seg.c & 1) {
                 // reverse complement
                 while (a < re.n && re.sites[a] < e) {
-                    p = seg.a + seg.y - (re.sites[a] - seg.x); // position on seq
+                    p = seg.a + (seg.y - 1) - (re.sites[a] - seg.x); // position on seq
                     if (p < l)
-                        ds[(MAX(p, 1) - 1) / resolution << 1] += 1.;
+                        ds[p / resolution << 1] += 1.;
                     else
-                        ds[(MAX(seq.len - p, 1) - 1) / resolution << 1 | 1] += 1.;
+                        ds[(seq.len - p - 1) / resolution << 1 | 1] += 1.;
                     ++a;
                 }
             } else {
                 while (a < re.n && re.sites[a] < e) {
                     p = seg.a + re.sites[a] - seg.x; // position on seq
                     if (p < l)
-                        ds[(MAX(p, 1) - 1) / resolution << 1] += 1.;
+                        ds[p / resolution << 1] += 1.;
                     else
-                        ds[(MAX(seq.len - p, 1) - 1) / resolution << 1 | 1] += 1.;
+                        ds[(seq.len - p - 1) / resolution << 1 | 1] += 1.;
                     ++a;
                 }
             }

@@ -42,7 +42,7 @@ static void print_help(FILE *fp_help)
     fprintf(fp_help, "Usage: agp_to_fasta [options] <scaffolds.agp> <contigs.fa>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -l INT            line width [60]\n");
-    fprintf(fp_help, "    -u                include sequence components with unknown orientations\n");
+    fprintf(fp_help, "    -u                allow sequence components with unknown orientations\n");
     fprintf(fp_help, "    -o STR            output to file [stdout]\n");
     fprintf(fp_help, "    --version         show version number\n");
 }
@@ -65,7 +65,7 @@ int main(int argc, char *argv[])
 
     FILE *fo;
     char *fa, *agp, *out;
-    int line_wd, un_oris;
+    int line_wd, allow_unknown_oris;
 
     const char *opt_str = "o:ul:Vh";
     ketopt_t opt = KETOPT_INIT;
@@ -73,13 +73,13 @@ int main(int argc, char *argv[])
     FILE *fp_help = stderr;
     fa = agp = out = 0;
     line_wd = 60;
-    un_oris = 0;
+    allow_unknown_oris = 0;
 
     while ((c = ketopt(&opt, argc, argv, 1, opt_str, long_options)) >= 0) {
         if (c == 'l') {
             line_wd = atoi(opt.arg);
         } else if (c == 'u') {
-            un_oris = 1;
+            allow_unknown_oris = 1;
         } else if (c == 'o') {
             out = opt.arg;
         } else if (c == 'h') {
@@ -116,7 +116,7 @@ int main(int argc, char *argv[])
         exit(EXIT_FAILURE);
     }
     
-    write_fasta_file_from_agp(fa, agp, fo, line_wd, un_oris);
+    write_fasta_file_from_agp(fa, agp, fo, line_wd, allow_unknown_oris);
 
     if (out != 0)
         fclose(fo);

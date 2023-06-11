@@ -27,6 +27,7 @@
  * 02/09/21 - Chenxi Zhou: Created                                               *
  *                                                                               *
  *********************************************************************************/
+#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <assert.h>
@@ -38,7 +39,6 @@
 #include "asset.h"
 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
-#define strcasecmp(s1, s2) strcmp_case_insensitive(s1, s2)
 
 double cputime(void)
 {
@@ -212,7 +212,7 @@ int is_valid_bin_header(int64_t n)
     return n == magic_number;
 }
 
-int strcmp_case_insensitive (const char *s1, const char *s2)
+int strcmp_case_insensitive(const char *s1, const char *s2)
 {
     const unsigned char *p1 = (const unsigned char *) s1;
     const unsigned char *p2 = (const unsigned char *) s2;
@@ -225,3 +225,10 @@ int strcmp_case_insensitive (const char *s1, const char *s2)
     return result;
 }
 
+void positive_or_die(int num)
+{
+    if (num <= 0 ) {
+        fprintf(stderr, "[E::%s] nonpositive numeric error: %d\n", __func__, num);
+        exit(EXIT_FAILURE);
+    }
+}
