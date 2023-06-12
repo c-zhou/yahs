@@ -103,4 +103,4 @@ You can find more information about manual editing with Juicebox [here](https://
 
 ## Citation
 
-Chenxi Zhou, Shane A. McCarthy, Richard Durbin. YaHS: yet another Hi-C scaffolding tool. 2022. bioRxiv doi: https://doi.org/10.1101/2022.06.09.495093
+Chenxi Zhou, Shane A. McCarthy, Richard Durbin. YaHS: yet another Hi-C scaffolding tool. *Bioinformatics*, 39(1), btac808.

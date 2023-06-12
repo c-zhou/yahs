@@ -628,10 +628,10 @@ static void print_help(FILE *fp_help, int is_long_help)
     if (is_long_help) {
         fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
         fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
-        fprintf(fp_help, "    --seq-ctype   STR      sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
-        fprintf(fp_help, "    --gap-ctype   STR      gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
-        fprintf(fp_help, "    --gap-link    STR      gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
-        fprintf(fp_help, "    --gap-size    INT      gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
+        fprintf(fp_help, "    --seq-ctype   STR      AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-ctype   STR      AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-link    STR      AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+        fprintf(fp_help, "    --gap-size    INT      AGP output gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
     }
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");

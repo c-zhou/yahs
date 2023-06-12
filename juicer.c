@@ -777,11 +777,14 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
             strcpy(c0, c1);
         }
 
-        if (sd_coordinate_rev_conversion(dict, asm_sd_get(dict, c1), mlen - clen, &s, &p, 0)) {
+        if (sd_coordinate_rev_conversion(dict, asm_sd_get(dict, c1), mlen - clen, &s, &p, 0) != CC_SUCCESS) {
             fprintf(stderr, "[E::%s] coordinates conversion error %s %u\n", __func__, c1, mlen - clen);
             exit(EXIT_FAILURE);
         }
-            
+
+        if (clen == 0)
+            fprintf(stderr, "[W::%s] segment of length zero in line: %s\n", __func__, line);
+
         if (cid > m) {
             m <<= 1;
             coords = (uint32_t *) realloc(coords, sizeof(uint32_t) * m * 3);
@@ -853,10 +856,10 @@ static void print_help_post(FILE *fp_help)
     fprintf(fp_help, "Usage: juicer post [options] <review.assembly> <liftover.agp> <contigs.fa[.fai]>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for scaffolds FASTA output) [stdout]\n");
-    fprintf(fp_help, "    --seq-ctype STR   sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
-    fprintf(fp_help, "    --gap-ctype STR   gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
-    fprintf(fp_help, "    --gap-link  STR   gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
-    fprintf(fp_help, "    --gap-size  INT   gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
+    fprintf(fp_help, "    --seq-ctype STR   AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
+    fprintf(fp_help, "    --gap-ctype STR   AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
+    fprintf(fp_help, "    --gap-link  STR   AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+    fprintf(fp_help, "    --gap-size  INT   AGP output gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
     fprintf(fp_help, "    --version         show version number\n");
 }
 
