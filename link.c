@@ -1237,22 +1237,16 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
     }
 }
 
-static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t mq, int32_t *s, int32_t *e, uint8_t *q, char **cname)
+static char *parse_bam_rec(bam1_t *b, bam_header_t *h, int32_t *s, int32_t *e, uint8_t *q, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
     if (b->core.flag & 0xF04)
         return 0;
     *cname = h->target_name[b->core.tid];
-    if (b->core.qual < mq) {
-        *s = -1;
-        *e = -1;
-        *q = 0;
-    } else {
-        *s = b->core.pos;
-        *e = get_target_end(b);
-        *q = b->core.qual;
-    }
-    
+    *s = b->core.pos;
+    *e = get_target_end(b);
+    *q = b->core.qual;
+
     return strdup(bam1_qname(b));
 }
 
@@ -1314,7 +1308,6 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     cname0 = cname1 = rname0 = rname1 = 0;
     s0 = s1 = e0 = e1 = 0;
     i0 = i1 = p0 = p1 = 0;
-    q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
     cov = cov_init(dict->n);
@@ -1331,12 +1324,14 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                 fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if (buff == 0) {
-                rname0 = parse_bam_rec(b, h, mq, &s0, &e0, &q0, &cname0);
+                q0 = 255;
+                rname0 = parse_bam_rec(b, h, &s0, &e0, &q0, &cname0);
                 if (!rname0)
                     continue;
                 ++buff;
             } else if (buff == 1) {
-                rname1 = parse_bam_rec(b, h, mq, &s1, &e1, &q1, &cname1);
+                q1 = 255;
+                rname1 = parse_bam_rec(b, h, &s1, &e1, &q1, &cname1);
                 if (!rname1)
                     continue;
                 if (strcmp(rname0, rname1) == 0) {
@@ -1344,6 +1339,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 
                     i0 = sd_get(dict, cname0);
                     i1 = sd_get(dict, cname1);
+                    q = MIN(q0, q1);
 
                     if (i0 == UINT32_MAX) {
                         k = kh_put(str, hmseq, cname0, &absent);
@@ -1357,7 +1353,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                             kh_key(hmseq, k) = strdup(cname1);
                             fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                         }
-                    } else {
+                    } else if (q >= mq) {
                         // update read coverage
                         // fix bad alignments
                         s0 = MIN_MAX(s0, 0, dict->s[i0].len - 1);
@@ -1386,7 +1382,6 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                             SWAP(uint32_t, i0, i1);
                             SWAP(uint32_t, p0, p1);
                         }
-                        q = MIN(q0, q1);
                         fwrite(&i0, sizeof(uint32_t), 1, fo);
                         fwrite(&p0, sizeof(uint32_t), 1, fo);
                         fwrite(&i1, sizeof(uint32_t), 1, fo);
@@ -1563,9 +1558,6 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     write_bin_header(fo);
     sd_l = write_sequence_dictionary(fo, dict);
 
-    s0 = s1 = e0 = e1 = 0;
-    i0 = i1 = p0 = p1 = 0;
-    q0 = q1 = 0;
     rec_c = pair_c = inter_c = intra_c = 0;
     buff = 0;
     cov = cov_init(dict->n);
@@ -1580,15 +1572,22 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
             fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
         if (buff == 0) {
-            sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
+            cname0[0] = rname0[0] = '\0';
+            s0 = e0 = UINT32_MAX;
+            q0 = 255;
+            sscanf(line, "%s %u %u %s %hhu", cname0, &s0, &e0, rname0, &q0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %u %u %s %hhu %*s", cname1, &s1, &e1, rname1, &q1);
+            cname1[0] = rname1[0] = '\0';
+            s1 = e1 = UINT32_MAX;
+            q1 = 255;
+            sscanf(line, "%s %u %u %s %hhu", cname1, &s1, &e1, rname1, &q1);
             if (is_read_pair(rname0, rname1)) {
                 buff = 0;
 
                 i0 = sd_get(dict, cname0);
                 i1 = sd_get(dict, cname1);
+                q = MIN(q0, q1);
 
                 if (i0 == UINT32_MAX) {
                     k = kh_put(str, hmseq, cname0, &absent);
@@ -1602,7 +1601,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                         kh_key(hmseq, k) = strdup(cname1);
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
-                } else {
+                } else if (q >= mq) {
                    // update read coverage
                    // fix bad alignments
                    s0 = MIN_MAX(s0, 0, dict->s[i0].len - 1);
@@ -1630,7 +1629,6 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                         SWAP(uint32_t, i0, i1);
                         SWAP(uint32_t, p0, p1);
                     }
-                    q = MIN(q0, q1);
                     fwrite(&i0, sizeof(uint32_t), 1, fo);
                     fwrite(&p0, sizeof(uint32_t), 1, fo);
                     fwrite(&i1, sizeof(uint32_t), 1, fo);
@@ -1653,6 +1651,149 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                 q0 = q1;
                 strcpy(rname0, rname1);
             }
+        }
+    }
+
+    m = pos_compression(cov);
+    fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+
+    for (k = 0; k < kh_end(hmseq); ++k)
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
+    kh_destroy(str, hmseq);
+
+    if (line)
+        free(line);
+    fclose(fp);
+    kclose(fh);
+    // write pair number
+    fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+    fseek(fo, pair_c * 17, SEEK_CUR);
+
+    fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
+
+    // cov_t *cov = bed_cstats(f, dict);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
+    fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
+    cov_destroy(cov);
+    cov_norm_destroy(cov_norm);
+
+    sd_destroy(dict);
+    fclose(fo);
+}
+
+void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t rl, uint32_t wd, double q_drop, const char *out)
+{
+    FILE *fp, *fo;
+    int fd;
+    void *fh;
+    char *line = NULL;
+    size_t ln = 0;
+    ssize_t read;
+    char cname0[4096], cname1[4096];
+    uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
+    uint8_t q, q0, q1;
+    uint64_t rec_c, pair_c, inter_c, intra_c, sd_l, n, m, max_m;
+    cov_t *cov;
+
+    khash_t(str) *hmseq; // for absent sequences
+    khint_t k;
+    int absent;
+    hmseq = kh_init(str);
+
+    sdict_t *dict = make_sdict_from_index(fai, ml);
+
+    fh = kopen(f, &fd);
+    fp = fdopen(fd, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
+        exit(EXIT_FAILURE);
+    }
+
+    fo = fopen(out, "w");
+    if (fo == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for writing\n", __func__, out);
+        exit(EXIT_FAILURE);
+    }
+    write_bin_header(fo);
+    sd_l = write_sequence_dictionary(fo, dict);
+
+    rl >>= 1;
+    rec_c = pair_c = inter_c = intra_c = 0;
+    cov = cov_init(dict->n);
+    n = 0;
+    max_m = 0x7FFFFFFULL; // 128MB - ~1GB mem for covs
+
+    fwrite(&pair_c, sizeof(uint64_t), 1, fo);
+
+    while ((read = getline(&line, &ln, fp)) != -1) {
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
+
+        cname0[0] = cname1[0] = '\0';
+        p0 = p1 = UINT32_MAX;
+        q0 = q1 = 255;
+        sscanf(line, "%*s %s %u %s %u %hhu %hhu", cname0, &p0, cname1, &p1, &q0, &q1);
+
+        i0 = sd_get(dict, cname0);
+        i1 = sd_get(dict, cname1);
+        q = MIN(q0, q1);
+
+        if (i0 == UINT32_MAX) {
+            k = kh_put(str, hmseq, cname0, &absent);
+            if (absent) {
+                kh_key(hmseq, k) = strdup(cname0);
+                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+            }
+        } else if (i1 == UINT32_MAX) {
+            k = kh_put(str, hmseq, cname1, &absent);
+            if (absent) {
+                kh_key(hmseq, k) = strdup(cname1);
+                fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+            }
+        } else if (q >= mq) {
+            // update read coverage
+            // fix bad alignments
+            s0 = MIN_MAX(p0 - MIN(p0, rl), 0, dict->s[i0].len - 1);
+            e0 = MIN_MAX(p0 + rl, 0, dict->s[i0].len - 1);
+            s1 = MIN_MAX(p1 - MIN(p1, rl), 0, dict->s[i1].len - 1);
+            e1 = MIN_MAX(p1 + rl, 0, dict->s[i1].len - 1);
+            kv_push(uint64_t, cov->p[i0], (uint64_t) s0 << 32 | (uint32_t) 1);
+            kv_push(uint64_t, cov->p[i0], (uint64_t) e0 << 32 | (uint32_t) -1);
+            kv_push(uint64_t, cov->p[i1], (uint64_t) s1 << 32 | (uint32_t) 1);
+            kv_push(uint64_t, cov->p[i1], (uint64_t) e1 << 32 | (uint32_t) -1);
+            n += 4;
+            if (n > max_m) {
+                m = pos_compression(cov); // m is the position size after compression
+                fprintf(stderr, "[I::%s] position compression n = %lu, m = %lu, max_m = %lu\n", __func__, n, m, max_m);
+                if (m > n>>1) {
+                    max_m <<= 1; // increase m limit if compression ratio smaller than 0.5
+                    fprintf(stderr, "[I::%s] position memory buffer expanded max_m = %lu\n", __func__, max_m);
+                }
+                n = m;
+            }
+
+            p0 = MIN(p0, dict->s[i0].len - 1);
+            p1 = MIN(p1, dict->s[i1].len - 1);
+            if (i0 > i1) {
+                SWAP(uint32_t, i0, i1);
+                SWAP(uint32_t, p0, p1);
+            }
+            fwrite(&i0, sizeof(uint32_t), 1, fo);
+            fwrite(&p0, sizeof(uint32_t), 1, fo);
+            fwrite(&i1, sizeof(uint32_t), 1, fo);
+            fwrite(&p1, sizeof(uint32_t), 1, fo);
+            fwrite(&q, sizeof(uint8_t), 1, fo);
+
+            if (i0 == i1)
+                ++intra_c;
+            else
+                ++inter_c;
+
+            ++pair_c;
         }
     }
 

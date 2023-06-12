@@ -166,12 +166,15 @@ int file_copy(char *fin, char *fout)
 
 int8_t is_read_pair(const char *rname0, const char *rname1)
 {
-    if (!strcmp(rname0, rname1))
-        return 1;
     int n = strlen(rname0);
-    if (n != strlen(rname1))
-        return 0;
-    if (!strncmp(rname0, rname1, n - 2))
+    if (n == 0 || n != strlen(rname1))
+          return 0;
+    if (!strcmp(rname0, rname1) || 
+            (n > 2 &&
+             !strncmp(rname0, rname1, n - 1) &&
+             rname0[n - 2] == '/' &&
+             rname1[n - 2] == '/' &&
+             rname0[n - 1] != rname1[n - 1]))
         return 1;
     return 0;
 }

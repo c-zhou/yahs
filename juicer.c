@@ -40,7 +40,7 @@
 
 static double jc_realtime0;
 
-enum fileTypes{NOSET, BED, BAM, BIN};
+enum fileTypes{NOSET, BED, BAM, BIN, PA5};
 
 void *kopen(const char *fn, int *_fd);
 int kclose(void *a);
@@ -143,21 +143,24 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
         exit(EXIT_FAILURE);
     }
 
-    s0 = s1 = e0 = e1 = 0;
-    i0 = i1 = 0;
-    p0 = p1 = 0;
     rec_c = pair_c = 0;
     buff = 0;
     while ((read = getline(&line, &ln, fp)) != -1) {
     
         if (++rec_c % 1000000 == 0)
-              fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
         if (buff == 0) {
-            sscanf(line, "%s %u %u %s %hhu %*s", cname0, &s0, &e0, rname0, &q0);
+            cname0[0] = rname0[0] = '\0';
+            s0 = e0 = UINT32_MAX;
+            q0 = 255;
+            sscanf(line, "%s %u %u %s %hhu", cname0, &s0, &e0, rname0, &q0);
             ++buff;
         } else if (buff == 1) {
-            sscanf(line, "%s %u %u %s %hhu %*s", cname1, &s1, &e1, rname1, &q1);
+            cname1[0] = rname1[0] = '\0';
+            s1 = e1 = UINT32_MAX;
+            q1 = 255;
+            sscanf(line, "%s %u %u %s %hhu", cname1, &s1, &e1, rname1, &q1);
             if (is_read_pair(rname0, rname1)) {
                 buff = 0;
 
@@ -226,19 +229,107 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     return 0;
 }
 
+static int make_juicer_pre_file_from_pa5(char *f, char *agp, char *fai, int8_t mq, int scale, int count_gap, FILE *fo)
+{
+    FILE *fp;
+    int fd;
+    void *fh;
+    char *line = NULL;
+    size_t ln = 0;
+    ssize_t read;
+    char cname0[4096], cname1[4096];
+    uint32_t x0, x1, i0, i1;
+    uint64_t p0, p1, rec_c, pair_c;
+    uint8_t q0, q1;
+    CC_ERR_t err0, err1;
+
+    khash_t(str) *hmseq; // for absent sequences
+    khint_t k;
+    int absent;
+    hmseq = kh_init(str);
+
+    sdict_t *sdict = make_sdict_from_index(fai, 0);
+    asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
+
+    fh = kopen(f, &fd);
+    fp = fdopen(fd, "r");
+    if (fp == NULL) {
+        fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
+        exit(EXIT_FAILURE);
+    }
+
+    rec_c = pair_c = 0;
+    while ((read = getline(&line, &ln, fp)) != -1) {
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
+
+        cname0[0] = cname1[0] = '\0';
+        x0 = x1 = UINT32_MAX;
+        q0 = q1 = 255;
+        sscanf(line, "%*s %s %u %s %u %hhu %hhu", cname0, &x0, cname1, &x1, &q0, &q1);
+
+        if (q0 < mq || q1 < mq)
+            continue;
+
+        err0 = sd_coordinate_conversion(dict, sd_get(sdict, cname0), x0, &i0, &p0, count_gap);
+        err1 = sd_coordinate_conversion(dict, sd_get(sdict, cname1), x1, &i1, &p1, count_gap);
+
+        if (err0 != CC_SUCCESS) {
+            if (err0 == SEQ_NOT_FOUND) {
+                k = kh_put(str, hmseq, cname0, &absent);
+                if (absent) {
+                    kh_key(hmseq, k) = strdup(cname0);
+                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
+                }
+            } else if (err0 == POS_NOT_IN_RANGE) {
+                fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__, cname0, x0);
+            }
+        } else if (err1 != CC_SUCCESS) {
+            if (err1 == SEQ_NOT_FOUND) {
+                k = kh_put(str, hmseq, cname1, &absent);
+                if (absent) {
+                    kh_key(hmseq, k) = strdup(cname1);
+                    fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
+                }
+            } else if (err1 == POS_NOT_IN_RANGE) {
+                fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__, cname1, x1);
+            }
+        } else {
+            if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
+                fprintf(fo, "0\t%s\t%lu\t0\t1\t%s\t%lu\t1\n", dict->s[i0].name, p0 >> scale, dict->s[i1].name, p1 >> scale);
+            else
+                fprintf(fo, "0\t%s\t%lu\t1\t1\t%s\t%lu\t0\n", dict->s[i1].name, p1 >> scale, dict->s[i0].name, p0 >> scale);
+
+            ++pair_c;
+        }
+    }
+
+    fprintf(stderr, "[I::%s] %ld read pairs processed\n", __func__, pair_c);
+
+    for (k = 0; k < kh_end(hmseq); ++k)
+        if (kh_exist(hmseq, k))
+            free((char *) kh_key(hmseq, k));
+    kh_destroy(str, hmseq);
+
+    if (line)
+        free(line);
+    fclose(fp);
+    kclose(fh);
+    asm_destroy(dict);
+    sd_destroy(sdict);
+
+    return 0;
+}
+
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
-    if (b->core.flag & 0xF04)
+    if ((b->core.flag & 0xF04) || b->core.qual < q)
         return 0;
     *cname = h->target_name[b->core.tid];
-    if (b->core.qual < q) {
-        *s = -1;
-        *e = -1;
-    } else {
-        *s = b->core.pos;
-        *e = get_target_end(b);
-    }
+    *s = b->core.pos;
+    *e = get_target_end(b);
 
     return strdup(bam1_qname(b));
 }
@@ -247,7 +338,7 @@ static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0
 {
     // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
     if (b->core.flag & 0xF4C)
-        return -1;
+        return 1;
     *cname0 = h->target_name[b->core.tid];
     *s0 = b->core.pos;
     *cname1 = h->target_name[b->core.mtid];
@@ -372,7 +463,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
             if (++rec_c % 1000000 == 0)
                 fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c); 
             
-            if(parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1) < 0)
+            if(parse_bam_rec1(b, h, &cname0, &s0, &cname1, &s1))
                 continue;
 
             err0 = sd_coordinate_conversion(dict, sd_get(sdict, cname0), s0, &i0, &p0, count_gap);
@@ -513,7 +604,7 @@ static void print_help_pre(FILE *fp_help)
     fprintf(fp_help, "    -a                preprocess for assembly mode\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for '-a' mode) [stdout]\n");
-    fprintf(fp_help, "    --file-type STR   input file type BED|BAM|BIN, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --file-type STR   input file type BED|BAM|BIN|PA5, file name extension is ignored if set\n");
     fprintf(fp_help, "    --version         show version number\n");
 }
 
@@ -561,6 +652,8 @@ static int main_pre(int argc, char *argv[])
                 f_type = BAM;
             else if (strcasecmp(opt.arg, "BIN") == 0)
                 f_type = BIN;
+            else if (strcasecmp(opt.arg, "PA5") == 0)
+                f_type = PA5;
             else {
                 fprintf(stderr, "[E::%s] unknown file type: \"%s\"\n", __func__, opt.arg);
                 return 1;
@@ -612,8 +705,9 @@ static int main_pre(int argc, char *argv[])
         if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
         else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
         else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
+        else if (strcasecmp(ext, ".pa5") == 0) f_type = PA5;
         else {
-            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin or --file-type is expected\n", __func__);
+            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed, .pa5 or .bin or --file-type is expected\n", __func__);
             exit(EXIT_FAILURE);
         }
     }
@@ -664,6 +758,9 @@ static int main_pre(int argc, char *argv[])
     } else if (f_type == BED) {
         fprintf(stderr, "[I::%s] make juicer pre input from BED file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bed(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
+    } else if (f_type == PA5) {
+        fprintf(stderr, "[I::%s] make juicer pre input from PA5 file %s\n", __func__, link_file);
+        ret = make_juicer_pre_file_from_pa5(link_file, agp1, fai, mq8, scale, !asm_mode, fo);
     } else if (f_type == BIN) {
         fprintf(stderr, "[I::%s] make juicer pre input from BIN file %s\n", __func__, link_file);
         ret = make_juicer_pre_file_from_bin(link_file, agp1, fai, mq8, scale, !asm_mode, fo);

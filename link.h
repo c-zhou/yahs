@@ -109,6 +109,7 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
 void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *dict, int8_t *directs);
 void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out);
 void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out);
+void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t rl, uint32_t wd, double q_drop, const char *out);
 long estimate_intra_link_mat_init_rss(void *dict, uint32_t resolution, int use_gap_seq);
 long estimate_inter_link_mat_init_rss(asm_dict_t *dict, uint32_t resolution, uint32_t radius);
 #ifdef __cplusplus

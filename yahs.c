@@ -81,7 +81,7 @@ static uint32_t l_stats[10];
 
 double qbinom(double, double, double, int, int);
 
-enum fileTypes{NOSET, BED, BAM, BIN};
+enum fileTypes{NOSET, BED, BAM, BIN, PA5};
 
 int VERBOSE = 0;
 
@@ -636,7 +636,8 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
     fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
-    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|BIN, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|BIN|PA5, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --read-length          read length (required for PA5 format input) [150]\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    -?                     print long help with extra option list\n");
@@ -654,6 +655,7 @@ static ko_longopt_t long_options[] = {
     { "gap-ctype",      ko_required_argument, 308 },
     { "gap-link",       ko_required_argument, 309 },
     { "gap-size",       ko_required_argument, 310 },
+    { "read-length",    ko_required_argument, 311 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -672,7 +674,7 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, mq, ml, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell;
+    int *resolutions, nr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell;
     uint32_t wd;
     double q_drop, d_mass_frac;
     enum fileTypes f_type;
@@ -686,6 +688,7 @@ int main(int argc, char *argv[])
     no_contig_ec = no_scaffold_ec = no_mem_check = 0;
     mq = 10;
     ml = 0;
+    rl = 150;
     ecstr = 0;
     wd = 1000;
     q_drop = 0.1;
@@ -725,6 +728,8 @@ int main(int argc, char *argv[])
                 f_type = BAM;
             else if (strcasecmp(opt.arg, "BIN") == 0)
                 f_type = BIN;
+            else if (strcasecmp(opt.arg, "PA5") == 0)
+                f_type = PA5;
             else {
                 fprintf(stderr, "[E::%s] unknown file type: \"%s\"\n", __func__, opt.arg);
                 return 1;
@@ -745,6 +750,8 @@ int main(int argc, char *argv[])
             DEFAULT_AGP_LINKAGE_EVIDENCE = agp_linkage_evidence_key(opt.arg);
         } else if (c == 310) {
             DEFAULT_AGP_GAP_SIZE = atoi(opt.arg);
+        } else if (c == 311) {
+            rl = atoi(opt.arg);
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -787,6 +794,11 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    if (rl < 0) {
+        fprintf(stderr, "[E::%s] invalid read length: %d\n", __func__, rl);
+        return 1;
+    }
+
     if (d_min_cell < 10) {
         d_min_cell = 10;
         fprintf(stderr, "[W::%s] using cell threshold for D: %d\n", __func__, d_min_cell);
@@ -813,8 +825,9 @@ int main(int argc, char *argv[])
         if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
         else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
         else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
+        else if (strcasecmp(ext, ".pa5") == 0) f_type = PA5;
         else {
-            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed or .bin or --file-type is expected\n", __func__);
+            fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed, .pa5 or .bin or --file-type is expected\n", __func__);
             exit(EXIT_FAILURE);
         }
     }
@@ -920,6 +933,11 @@ int main(int argc, char *argv[])
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BED) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_bed_file(link_file, fai, ml, 0, wd, q_drop, link_bin_file);
+    } else if (f_type == PA5) {
+        link_bin_file = malloc(strlen(out) + 5);
+        sprintf(link_bin_file, "%s.bin", out);
+        fprintf(stderr, "[I::%s] dump hic links (PA5) to binary file %s\n", __func__, link_bin_file);
+        dump_links_from_pa5_file(link_file, fai, ml, 0, rl, wd, q_drop, link_bin_file);
     } else if (f_type == BIN) {
         link_bin_file = malloc(strlen(link_file) + 1);
         sprintf(link_bin_file, "%s", link_file);
