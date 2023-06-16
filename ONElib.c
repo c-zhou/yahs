@@ -1245,8 +1245,8 @@ OneFile *oneFileOpenRead (const char *path, OneSchema *vs, char *fileType, int n
       if (peek & 0x80)
         peek = vf->binaryTypeUnpack[peek];
 
-      if (isalpha(peek))
-        break;    // loop exit at standard data line
+      if (isalpha(peek) || peek == '\n')
+        break;    // loop exit at standard data line, '\n' for a empty file
       
       oneReadLine(vf);  // can't fail because we checked file eof already
 
