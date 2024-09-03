@@ -618,7 +618,7 @@ static int default_nr(char *fai, uint32_t ml)
 
 static void print_help(FILE *fp_help, int is_long_help)
 {
-    fprintf(fp_help, "Usage: yahs [options] <contigs.fa> <hic.bed>|<hic.bam>|<hic.bin>\n");
+    fprintf(fp_help, "Usage: yahs [options] <contigs.fa> <hic.bed>|<hic.bam>|<hic.pa5>|<hic.bin>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a FILE                AGP file (for rescaffolding) [none]\n");
     fprintf(fp_help, "    -r INT[,INT,...]       list of resolutions in ascending order [automate]\n");
@@ -628,6 +628,7 @@ static void print_help(FILE *fp_help, int is_long_help)
     if (is_long_help) {
         fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
         fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
+        fprintf(fp_help, "    --binary-only          make a binary ouput file from the input and exit\n");
         fprintf(fp_help, "    --seq-ctype   STR      AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
         fprintf(fp_help, "    --gap-ctype   STR      AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
         fprintf(fp_help, "    --gap-link    STR      AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
@@ -636,7 +637,7 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
     fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
-    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|BIN|PA5, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|PA5|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    --read-length          read length (required for PA5 format input) [150]\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
@@ -656,6 +657,7 @@ static ko_longopt_t long_options[] = {
     { "gap-link",       ko_required_argument, 309 },
     { "gap-size",       ko_required_argument, 310 },
     { "read-length",    ko_required_argument, 311 },
+    { "binary-only",    ko_no_argument, 312 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -674,7 +676,7 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell;
+    int *resolutions, nr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, binary_only;
     uint32_t wd;
     double q_drop, d_mass_frac;
     enum fileTypes f_type;
@@ -694,6 +696,7 @@ int main(int argc, char *argv[])
     q_drop = 0.1;
     d_min_cell = 30;
     d_mass_frac = 0.99;
+    binary_only = 0;
     f_type = NOSET;
     is_long_help = 0;
 
@@ -752,6 +755,8 @@ int main(int argc, char *argv[])
             DEFAULT_AGP_GAP_SIZE = atoi(opt.arg);
         } else if (c == 311) {
             rl = atoi(opt.arg);
+        } else if (c == 312) {
+            binary_only = 1;
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -939,6 +944,10 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[I::%s] dump hic links (PA5) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_pa5_file(link_file, fai, ml, 0, rl, wd, q_drop, link_bin_file);
     } else if (f_type == BIN) {
+        if (binary_only) {
+            fprintf(stderr, "[E::%s] Input is already in BIN format\n", __func__);
+            exit(EXIT_FAILURE);
+        }
         link_bin_file = malloc(strlen(link_file) + 1);
         sprintf(link_bin_file, "%s", link_file);
         // check if it is a valid BIN file
@@ -948,7 +957,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[E::%s] Make sure the same contig length threshold (%d) was applied for the BIN file\n", __func__, ml);
             exit(EXIT_FAILURE);
         }
-        sd_destroy(sdict);    
+        sd_destroy(sdict);
     }
 
 #ifdef DEBUG_OPTIONS
@@ -971,6 +980,8 @@ int main(int argc, char *argv[])
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[C]: %d\n", __func__, no_contig_ec);
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
+
+    if (binary_only) goto final_clean;
 
     ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, re_cuts, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
     
@@ -996,6 +1007,8 @@ int main(int argc, char *argv[])
         asm_destroy(dict);
         sd_destroy(sdict);
     }
+
+final_clean:
 
     if (fai)
         free(fai);

@@ -5,6 +5,7 @@ OBJS=
 PROG=       yahs juicer agp_to_fasta
 PROG_EXTRA=
 LIBS=		-lm -lz
+DESTDIR=	~/bin
 
 .PHONY:all extra clean depend
 .SUFFIXES:.c .o
@@ -30,6 +31,10 @@ agp_to_fasta: asset.c kalloc.c kopen.c sdict.c agp_to_fasta.c
 
 clean:
 		rm -fr *.o a.out $(PROG) $(PROG_EXTRA)
+
+install:
+		cp $(PROG) $(DESTDIR)
+
 
 depend:
 		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(CPPFLAGS) -- *.c)

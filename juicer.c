@@ -325,7 +325,7 @@ static int make_juicer_pre_file_from_pa5(char *f, char *agp, char *fai, int8_t m
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, int32_t *e, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
-    if ((b->core.flag & 0xF04) || b->core.qual < q)
+    if ((b->core.flag & 0xF04) || (!b->core.flag) || b->core.qual < q)
         return 0;
     *cname = h->target_name[b->core.tid];
     *s = b->core.pos;
@@ -337,7 +337,7 @@ static char *parse_bam_rec(bam1_t *b, bam_header_t *h, uint8_t q, int32_t *s, in
 static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0, char **cname1, int32_t *s1)
 {
     // 0x4 0x8 0x40 0x100 0x200 0x400 0x800
-    if (b->core.flag & 0xF4C)
+    if ((b->core.flag & 0xF4C) || (!b->core.flag))
         return 1;
     *cname0 = h->target_name[b->core.tid];
     *s0 = b->core.pos;
@@ -477,8 +477,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname0);
                     }
                 } else if (err0 == POS_NOT_IN_RANGE) {
-                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
-                            cname0, s0 / 2 + e0 / 2 + (s0 & 1 && e0 & 1));
+                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__, cname0, s0);
                 }
             } else if (err1 != CC_SUCCESS) {
                 if (err1 == SEQ_NOT_FOUND) {
@@ -488,8 +487,7 @@ static int make_juicer_pre_file_from_bam(char *f, char *agp, char *fai, uint8_t 
                         fprintf(stderr, "[W::%s] sequence \"%s\" not found \n", __func__, cname1);
                     }
                 } else if (err1 == POS_NOT_IN_RANGE) {
-                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__,
-                            cname1, s1 / 2 + e1 / 2 + (s1 & 1 && e1 & 1));
+                    fprintf(stderr, "[W::%s] sequence position \"%s:%u\" not in range \n", __func__, cname1, s1);
                 }
             } else {
                 if (strcmp(dict->s[i0].name, dict->s[i1].name) <= 0)
@@ -599,12 +597,12 @@ uint64_t assembly_scale_max_seq(asm_dict_t *dict, int *scale, uint64_t max_s, ui
 
 static void print_help_pre(FILE *fp_help)
 {
-    fprintf(fp_help, "Usage: juicer pre [options] <hic.bed>|<hic.bam>|<hic.bin> <scaffolds.agp> <contigs.fa.fai>\n");
+    fprintf(fp_help, "Usage: juicer pre [options] <hic.bed>|<hic.bam>|<hic.pa5>|<hic.bin> <scaffolds.agp> <contigs.fa.fai>\n");
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a                preprocess for assembly mode\n");
     fprintf(fp_help, "    -q INT            minimum mapping quality [10]\n");
     fprintf(fp_help, "    -o STR            output file prefix (required for '-a' mode) [stdout]\n");
-    fprintf(fp_help, "    --file-type STR   input file type BED|BAM|BIN|PA5, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --file-type STR   input file type BED|BAM|PA5|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    --version         show version number\n");
 }
 
