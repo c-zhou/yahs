@@ -1240,7 +1240,7 @@ void calc_link_directs(inter_link_mat_t *link_mat, double min_norm, asm_dict_t *
 static char *parse_bam_rec(bam1_t *b, bam_header_t *h, int32_t *s, int32_t *e, uint8_t *q, char **cname)
 {
     // 0x4 0x100 0x200 0x400 0x800
-    if (b->core.flag & 0xF04)
+    if ((b->core.flag & 0xF04) || (!b->core.flag))
         return 0;
     *cname = h->target_name[b->core.tid];
     *s = b->core.pos;
@@ -1254,7 +1254,7 @@ static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0
 {
     // 0x4 0x8 [0x40] 0x100 0x200 0x400 0x800
     // if (b->core.flag & 0xF4C)
-    if (b->core.flag & 0xF0C)
+    if ((b->core.flag & 0xF0C) || (!b->core.flag))
         return -1;
 
     *cname0 = h->target_name[b->core.tid];
