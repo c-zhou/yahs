@@ -462,6 +462,7 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unkn
             n = 0;
             gs.n = 0;
             gsize.n = 0;
+            gcomp.n = 0;
             gtype.n = 0;
             glink.n = 0;
             gevid.n = 0;

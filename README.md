@@ -27,6 +27,8 @@ With `-a` option, you can specify a AGP format file to ask YaHS to do scaffoldin
 
 With `-r` option, you can specify a range of resultions (in ascending order). It is `10000,20000,50000,100000,200000,500000,1000000,2000000,5000000,10000000,20000000,50000000,100000000,200000000,500000000` by default and the upper limit is automatically adjusted by the genome size. For highly fragmented genome assemblies, you can try to start with higher resultions by adding smaller `-r` values.
 
+With `-R` option, you can specify the number of rounds to run for each resolution level.
+
 With `-e` option, you can specify the restriction enzyme(s) used by the Hi-C experiment. For example, `GATC` for the DpnII restriction enzyme used by the Dovetail Hi-C Kit; `GATC,GANTC` and `GATC,GANTC,CTNAG,TTAA` for Arima genomics 2-enzyme and 4-enzyme protocol, respectively. Sometimes, the specification of enzymes may not change the scaffolding result very much if not make it worse, especially when the base quality of the assembly is not very good, e.g., assembies constructed from noisy long reads.
 
 With `-l` option, you can specify the minimum contig length included for scaffolding.
@@ -42,6 +44,8 @@ With `--no-mem-check` option, the runtime memory check is disabled. When running
 With `--file-type` option, you can specify the input file format. It has to be set when in the input is pipe in.
 
 With `--read-length` option, you can specify the read length of your HiC data. This is only required and used when the input is in pair format.
+
+With `--telo-motif` option, you can specify a telomeric motif. This will be used to identify telomeric sequences on each input sequences. Sequences representing telomeric ends will not be allowed to join with other sequences. YaHS maintains a telomeric motif database as default (see `telo.h`). If this option is set, only this motif will be checked. The code for telomere identification was adopted from [seqtk telo](https://github.com/lh3/seqtk).
 
 YaHS also allows customizations of the output AGP file, such as changing the scaffold gap size, linkage evidence etc. See the long help message (`yahs -?`) and the [AGP specification documentation](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification) for details.
 

@@ -40,6 +40,7 @@
 #include "graph.h"
 #include "break.h"
 #include "enzyme.h"
+#include "telo.h"
 #include "asset.h"
 #include "version.h"
 
@@ -76,6 +77,8 @@ static double ec_min_frac = .8;
 static double ec_fold_thresh = .2;
 static double max_noise_ratio = .1;
 
+static int max_extra_try = 3;
+
 static uint64_t n_stats[10];
 static uint32_t l_stats[10];
 
@@ -87,9 +90,10 @@ int VERBOSE = 0;
 
 static double ys_realtime0;
 
-graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, double min_norm, double la)
+graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, double min_norm, double la, int8_t *telo_ends)
 {
     int32_t i, j, n, c0, c1;
+    uint32_t v, w;
     int8_t t;
     double norm, qla;
     inter_link_t *link;
@@ -122,8 +126,12 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
 #endif
                         continue;
                     }
-                    arc = graph_add_arc(g, c0<<1|j>>1, c1<<1|(j&1), -1, 0, norm);
-                    graph_add_arc(g, c1<<1|!(j&1), c0<<1|!(j>>1), arc->link_id, 0, norm);
+                    v = c0<<1 | (j>>1);
+                    w = c1<<1 | (j&1);
+                    if (telo_ends[v^1] || telo_ends[w])
+                        continue;
+                    arc = graph_add_arc(g, v, w, -1, 0, norm);
+                    graph_add_arc(g, w^1, v^1, arc->link_id, 0, norm);
                 }
             }
         }
@@ -135,7 +143,39 @@ graph_t *build_graph_from_links(inter_link_mat_t *link_mat, asm_dict_t *dict, do
     return g;
 }
 
-int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, char *out, int resolution, double *noise, uint32_t d_min_cell, double d_mass_frac, long rss_limit, int no_mem_check)
+#define MAX_TELO_CLIP 50
+
+int8_t *find_aseq_telos(asm_dict_t *dict, int8_t *telo_ends)
+{   
+    int i, n;
+    int8_t *telos;
+    sdict_t *sdict;
+    sd_aseq_t *aseq;
+    sd_seg_t *segs, *seg;
+    
+    sdict = dict->sdict;
+    n = dict->n;
+    telos = (int8_t *) calloc(dict->n * 2, sizeof(int8_t));
+
+    segs = dict->seg;
+    for (i = 0; i < n; i++) {
+        aseq = &dict->s[i];
+        // first seg
+        seg = &segs[aseq->s];
+        if ((telo_ends[seg->c>>1<<1] && seg->x <= MAX_TELO_CLIP && (seg->c&1) == 0) ||
+            (telo_ends[seg->c>>1<<1|1] && (seg->x + seg->y + MAX_TELO_CLIP) >= sdict->s[seg->c>>1].len && (seg->c&1) == 1))
+            telos[i<<1] = 1;
+        // last seg
+        seg = &segs[aseq->s + aseq->n - 1];
+        if ((telo_ends[seg->c>>1<<1] && seg->x <= MAX_TELO_CLIP && (seg->c&1) == 1) ||
+            (telo_ends[seg->c>>1<<1|1] && (seg->x + seg->y + MAX_TELO_CLIP) >= sdict->s[seg->c>>1].len && (seg->c&1) == 0))
+            telos[i<<1|1] = 1;
+    }
+
+    return telos;
+}
+
+int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm, uint32_t ml, uint8_t mq, re_cuts_t *re_cuts, int8_t *telo_ends, char *out, int resolution, double *noise, uint32_t d_min_cell, double d_mass_frac, long rss_limit, int no_mem_check)
 {
     //TODO: adjust wt thres by resolution
     sdict_t *sdict = make_sdict_from_index(fai, ml);
@@ -216,8 +256,12 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     print_inter_link_norms(stderr, inter_link_mat, dict);
 #endif
 
+    int8_t *telos;
+    telos = find_aseq_telos(dict, telo_ends);
     fprintf(stderr, "[I::%s] starting scaffolding graph contruction...\n", __func__);
-    graph_t *g = build_graph_from_links(inter_link_mat, dict, .1, la);
+    graph_t *g = build_graph_from_links(inter_link_mat, dict, .1, la, telos);
+    
+    free(telos);
 
 #ifdef DEBUG_GRAPH_PRUNE
     fprintf(stderr, "[DEBUG_GRAPH_PRUNE::%s] scaffolding graph (before pruning) in GV format\n", __func__);
@@ -296,7 +340,7 @@ scaff_done:
     return re;
 }
 
-int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
+int contig_error_break(char *agp, char *fai, char *link_file, uint32_t ml, char *out)
 {
     uint32_t i, ec_round, err_no, bp_n;
     sdict_t *sdict;
@@ -304,16 +348,15 @@ int contig_error_break(char *fai, char *link_file, uint32_t ml, char *out)
     int dist_thres;
 
     sdict = make_sdict_from_index(fai, ml);
-    dict = make_asm_dict_from_sdict(sdict);
+    dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
     dist_thres = estimate_dist_thres_from_file(link_file, dict, ec_min_frac, ec_resolution, 0);
     dist_thres = MAX(dist_thres, ec_min_window);
     fprintf(stderr, "[I::%s] dist threshold for contig error break: %d\n", __func__, dist_thres);
-    asm_destroy(dict);
 
     char* out1 = (char *) malloc(strlen(out) + 35);
     ec_round = err_no = 0;
     while (1) {
-        dict = ec_round? make_asm_dict_from_agp(sdict, out1, 1) : make_asm_dict_from_sdict(sdict);
+        if (ec_round) dict = make_asm_dict_from_agp(sdict, out1, 1);
         link_mat_t *link_mat = link_mat_from_file(link_file, dict, dist_thres, ec_bin, .0, ec_move_avg, 0);
 #ifdef DEBUG_ERROR_BREAK
         fprintf(stderr, "[DEBUG_ERROR_BREAK::%s] ec_round %u link matrix\n", __func__, ec_round);
@@ -403,9 +446,10 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 #endif
 }
 
-int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, re_cuts_t *re_cuts, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
+int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, int rr, re_cuts_t *re_cuts, int8_t *telo_ends, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
 {
-    int ec_round, re, r, rc;
+    int ec_round, resolution, re, r, rn, rc, ex;
+    uint64_t n50;
     char *out_fn, *out_agp, *out_agp_break;
     double noise;
     FILE *fo;
@@ -427,12 +471,12 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
 
     cov_norm = cov_norm_from_file(link_file, sdict, wd);
     
-    if (agp == 0 && no_contig_ec == 0) {
+    if (no_contig_ec == 0) {
 #ifdef DEBUG
         fprintf(stderr, "[DEBUG::%s] perform contig error break...\n", __func__);
 #endif
         sprintf(out_agp_break, "%s_inital_break", out);
-        ec_round = contig_error_break(fai, link_file, ml, out_agp_break);
+        ec_round = contig_error_break(agp, fai, link_file, ml, out_agp_break);
         sprintf(out_agp_break, "%s_inital_break_%02d.agp", out, ec_round);
 #ifdef DEBUG
         fprintf(stderr, "[DEBUG::%s] contig error break done\n", __func__);
@@ -465,8 +509,6 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
         }
     }
 
-    r = rc = 0;
-    
     dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
     if (dict->n > MAX_N_SEQ) {
         fprintf(stderr, "[E::%s] sequence number exceeds limit (%d > %d)\n", __func__, dict->n, MAX_N_SEQ);
@@ -479,33 +521,58 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
     print_asm_stats(n_stats, l_stats, 1);
     asm_destroy(dict);
 
-    while (r++ < nr) {
-        fprintf(stderr, "[I::%s] scaffolding round %d resolution = %d\n", __func__, r, resolutions[r - 1]);
-        
+    r = rc = 0;
+    rn = rr;
+    ex = max_extra_try;
+    while (r < nr) {
+        resolution = resolutions[r];
+
         // dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
-        if (n_stats[4] < resolutions[r - 1] * 10) {
-            if (rc) {
+        if (n_stats[4] < resolution * 10) {
+            if (!ex) {
                 fprintf(stderr, "[I::%s] assembly N50 (%lu) too small. End of scaffolding.\n", __func__, n_stats[4]);
-                break;    
+                fprintf(stderr, "[I::%s] consider running with increased memory limit if there was a memory issue.\n", __func__);
+                break;
             } else {
-                fprintf(stderr, "[W::%s] assembly N50 (%lu) too small. Scaffolding anyway...\n", __func__, n_stats[4]);
-                fprintf(stderr, "[W::%s] consider running with increased memory limit if there was memory issue.\n", __func__);
+                if (r > 0)
+                    resolution = resolutions[r - 1]; // use the previous resolution level
+                else {
+                    resolution /= 10;
+                    if (resolution < 1000)
+                        resolution = 1000;
+                    if (resolution > resolutions[0])
+                        resolution = resolutions[0] / 2;
+                }
+
+                fprintf(stderr, "[I::%s] assembly N50 (%lu) too small.\n", __func__, n_stats[4]);
+                fprintf(stderr, "[I::%s] do an extra round scaffolding with resolution = %d\n", __func__, resolution);
+                ex--; // increase extra try number
             }
+        } else {
+            rn--;
+            if (!rn || n_stats[8] > resolution * 10) {
+                r++; // move to the next resolution level
+                rn = rr;
+            }
+            ex = max_extra_try; // reset extra try number
         }
 
-        sprintf(out_fn, "%s_r%02d", out, r);
+        rc++;
+        fprintf(stderr, "[I::%s] scaffolding round %d resolution = %d\n", __func__, rc, resolution);
+        
+        sprintf(out_fn, "%s_r%02d", out, rc);
         // noise per unit
-        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, out_fn, resolutions[r - 1], 
+        re = run_scaffolding(fai, out_agp_break, link_file, cov_norm, ml, mq, re_cuts, telo_ends, out_fn, resolution, 
                 &noise, d_min_cell, d_mass_frac, rss_limit, no_mem_check);
         if (!re) {
-            sprintf(out_agp, "%s_r%02d.agp", out, r);
+            sprintf(out_agp, "%s_r%02d.agp", out, rc);
             if (no_scaffold_ec == 0) {
 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG::%s] perform scaffold error break\n", __func__);
 #endif
 
-                sprintf(out_agp_break, "%s_r%02d_break.agp", out, r);
-                scaffold_error_break(fai, link_file, ml, mq, out_agp, resolutions[r - 1], noise, out_agp_break);
+                sprintf(out_agp_break, "%s_r%02d_break.agp", out, rc);
+                scaffold_error_break(fai, link_file, ml, mq, out_agp, resolution, noise, out_agp_break);
 #ifdef DEBUG
                 fprintf(stderr, "[DEBUG::%s] scaffold error break done\n", __func__);
 #endif
@@ -516,17 +583,20 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
 #endif
                 sprintf(out_agp_break, "%s", out_agp);
             }
-            ++rc;
         }
         // asm_destroy(dict);
 
-        fprintf(stderr, "[I::%s] scaffolding round %d done\n", __func__, r);
+        fprintf(stderr, "[I::%s] scaffolding round %d done\n", __func__, rc);
 
         dict = make_asm_dict_from_agp(sdict, out_agp_break, 1);
+        n50 = n_stats[4]; // old n50
         asm_sd_stats(dict, n_stats, l_stats);
+        // no improvements in a retry round 
+        if (ex < max_extra_try && n50 == n_stats[4])
+            ex = 0;
         print_asm_stats(n_stats, l_stats, 0);
         asm_destroy(dict);
-        
+
         /*** 
         if (re && re != ENOMEM_ERR) {
             fprintf(stderr, "[I::%s] Reach data limit for HiC contact density estimation in lower resulutions. End of scaffolding.\n", __func__);
@@ -622,6 +692,7 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "Options:\n");
     fprintf(fp_help, "    -a FILE                AGP file (for rescaffolding) [none]\n");
     fprintf(fp_help, "    -r INT[,INT,...]       list of resolutions in ascending order [automate]\n");
+    fprintf(fp_help, "    -R INT                 rounds to run at each resoultion level [1]\n");
     fprintf(fp_help, "    -e STR                 restriction enzyme cutting sites [none]\n");
     fprintf(fp_help, "    -l INT                 minimum length of a contig to scaffold [0]\n");
     fprintf(fp_help, "    -q INT                 minimum mapping quality [10]\n");
@@ -637,8 +708,9 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
     fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
-    fprintf(fp_help, "    --file-type STR        input file type BED|BAM|PA5|BIN, file name extension is ignored if set\n");
+    fprintf(fp_help, "    --file-type   STR      input file type BED|BAM|PA5|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    --read-length          read length (required for PA5 format input) [150]\n");
+    fprintf(fp_help, "    --telo-motif  STR      telomeric sequence motif\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    -?                     print long help with extra option list\n");
@@ -658,6 +730,7 @@ static ko_longopt_t long_options[] = {
     { "gap-size",       ko_required_argument, 310 },
     { "read-length",    ko_required_argument, 311 },
     { "binary-only",    ko_no_argument, 312 },
+    { "telo-motif",     ko_required_argument, 313 },
     { "help",           ko_no_argument, 'h' },
     { "version",        ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -676,18 +749,20 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, binary_only;
+    int *resolutions, nr, rr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, binary_only;
+    int8_t *telo_ends;
     uint32_t wd;
     double q_drop, d_mass_frac;
     enum fileTypes f_type;
 
-    const char *opt_str = "a:e:r:o:l:q:Vv:h";
+    const char *opt_str = "a:e:r:R:o:l:q:Vv:h";
     ketopt_t opt = KETOPT_INIT;
 
     int c, ret, is_long_help;
     FILE *fp_help = stderr;
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
     no_contig_ec = no_scaffold_ec = no_mem_check = 0;
+    rr = 1;
     mq = 10;
     ml = 0;
     rl = 150;
@@ -705,6 +780,8 @@ int main(int argc, char *argv[])
             agp = opt.arg;
         } else if (c == 'r') {
             restr = opt.arg;
+        } else if (c == 'R') {
+            rr = atoi(opt.arg);
         } else if (c == 'o') {
             out = opt.arg;
         } else if (c == 'l') {
@@ -757,6 +834,8 @@ int main(int argc, char *argv[])
             rl = atoi(opt.arg);
         } else if (c == 312) {
             binary_only = 1;
+        } else if (c == 313) {
+            telo_motif = opt.arg;
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -802,6 +881,16 @@ int main(int argc, char *argv[])
     if (rl < 0) {
         fprintf(stderr, "[E::%s] invalid read length: %d\n", __func__, rl);
         return 1;
+    }
+
+    if (check_motif(telo_motif)) {
+        fprintf(stderr, "[E::%s] invalid telomeric motif string: %s\n", __func__, telo_motif);
+        return 1;
+    }
+
+    if (rr < 1) {
+        rr = 1;
+        fprintf(stderr, "[W::%s] set round number to %d\n", __func__, rr);
     }
 
     if (d_min_cell < 10) {
@@ -850,9 +939,6 @@ int main(int argc, char *argv[])
 
     fai = (char *) malloc(strlen(fa) + 5);
     sprintf(fai, "%s.fai", fa);
-
-    if (agp)
-        no_contig_ec = 1;
     
     if (restr) {
         // resolutions
@@ -928,6 +1014,8 @@ int main(int argc, char *argv[])
         free(ecstr);
     }
 
+    telo_ends = telo_finder(fa, ml);
+
     if (f_type == BAM) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
@@ -983,7 +1071,7 @@ int main(int argc, char *argv[])
 
     if (binary_only) goto final_clean;
 
-    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, re_cuts, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
+    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, rr, re_cuts, telo_ends, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);
@@ -1015,6 +1103,9 @@ final_clean:
 
     if (restr)
         free(resolutions);
+
+    if (telo_ends)
+        free(telo_ends);
 
     if (link_bin_file)
         free(link_bin_file);
