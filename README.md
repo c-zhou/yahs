@@ -45,7 +45,7 @@ With `--file-type` option, you can specify the input file format. It has to be s
 
 With `--read-length` option, you can specify the read length of your HiC data. This is only required and used when the input is in pair format.
 
-With `--telo-motif` option, you can specify a telomeric motif. This will be used to identify telomeric sequences on each input sequences. Sequences representing telomeric ends will not be allowed to join with other sequences. YaHS maintains a telomeric motif database as default (see `telo.h`). If this option is set, only this motif will be checked. The code for telomere identification was adopted from [seqtk telo](https://github.com/lh3/seqtk).
+With `--telo-motif` option, you can specify a telomeric motif. This will be used to identify telomeric sequences on each input sequences. Sequences representing telomeric ends will not be allowed to join with other sequences. YaHS maintains a telomeric motif database as default (run `yahs --print-telo-motifs` to print a list the motifs). If this option is set, only this motif will be checked. The code for telomere identification was adopted from [seqtk telo](https://github.com/lh3/seqtk).
 
 YaHS also allows customizations of the output AGP file, such as changing the scaffold gap size, linkage evidence etc. See the long help message (`yahs -?`) and the [AGP specification documentation](https://www.ncbi.nlm.nih.gov/assembly/agp/AGP_Specification) for details.
 

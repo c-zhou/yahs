@@ -109,6 +109,14 @@ int check_motif(char *motif)
 	return 0;
 }
 
+void list_telo_motifs(FILE *fo)
+{
+	int i, ntelo;
+	ntelo = sizeof(telo_motif_db) / sizeof(char *);
+	for (i = 0; i < ntelo; i++)
+		fprintf(fo, "[%2d] %s\n", i+1, telo_motif_db[i]);
+}
+
 static uint64_t telo_finder_core(char *sequence, int slen, kh_64_t *mtab, int mlen, int penalty, int max_drop, int min_score)
 {
 	int c, hit;
@@ -163,7 +171,7 @@ int8_t *telo_finder(const char *f, uint32_t ml)
 	khash_t(64) *h;
 
 	sdict = make_sdict_from_fa(f, ml);
-    nseq  = sdict->n;
+	nseq  = sdict->n;
 	telo_ends = (int8_t *) calloc(nseq * 2, sizeof(int8_t));
 
 	ntelo = 0;

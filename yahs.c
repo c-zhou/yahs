@@ -699,11 +699,12 @@ static void print_help(FILE *fp_help, int is_long_help)
     if (is_long_help) {
         fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
         fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
-        fprintf(fp_help, "    --binary-only          make a binary ouput file from the input and exit\n");
         fprintf(fp_help, "    --seq-ctype   STR      AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
         fprintf(fp_help, "    --gap-ctype   STR      AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
         fprintf(fp_help, "    --gap-link    STR      AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
         fprintf(fp_help, "    --gap-size    INT      AGP output gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
+        fprintf(fp_help, "    --convert-to-binary    make a binary ouput file from the input and exit\n");
+        fprintf(fp_help, "    --print-telo-motifs    print telomeric motifs in the database and exit\n");
     }
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
@@ -718,21 +719,22 @@ static void print_help(FILE *fp_help, int is_long_help)
 }
 
 static ko_longopt_t long_options[] = {
-    { "no-contig-ec",   ko_no_argument, 301 },
-    { "no-scaffold-ec", ko_no_argument, 302 },
-    { "no-mem-check",   ko_no_argument, 303 },
-    { "D-min-cells",    ko_required_argument, 304 },
-    { "D-mass-frac",    ko_required_argument, 305 },
-    { "file-type",      ko_required_argument, 306 },
-    { "seq-ctype",      ko_required_argument, 307 },
-    { "gap-ctype",      ko_required_argument, 308 },
-    { "gap-link",       ko_required_argument, 309 },
-    { "gap-size",       ko_required_argument, 310 },
-    { "read-length",    ko_required_argument, 311 },
-    { "binary-only",    ko_no_argument, 312 },
-    { "telo-motif",     ko_required_argument, 313 },
-    { "help",           ko_no_argument, 'h' },
-    { "version",        ko_no_argument, 'V' },
+    { "no-contig-ec",      ko_no_argument, 301 },
+    { "no-scaffold-ec",    ko_no_argument, 302 },
+    { "no-mem-check",      ko_no_argument, 303 },
+    { "D-min-cells",       ko_required_argument, 304 },
+    { "D-mass-frac",       ko_required_argument, 305 },
+    { "file-type",         ko_required_argument, 306 },
+    { "seq-ctype",         ko_required_argument, 307 },
+    { "gap-ctype",         ko_required_argument, 308 },
+    { "gap-link",          ko_required_argument, 309 },
+    { "gap-size",          ko_required_argument, 310 },
+    { "read-length",       ko_required_argument, 311 },
+    { "telo-motif",        ko_required_argument, 312 },
+    { "print-telo-motifs", ko_no_argument, 313 },
+    { "convert-to-binary", ko_no_argument, 314 },
+    { "help",              ko_no_argument, 'h' },
+    { "version",           ko_no_argument, 'V' },
     { 0, 0, 0 }
 };
 
@@ -749,7 +751,8 @@ int main(int argc, char *argv[])
     ys_realtime0 = realtime();
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
-    int *resolutions, nr, rr, mq, ml, rl, no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, binary_only;
+    int *resolutions, nr, rr, mq, ml, rl;
+    int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, convert_binary;
     int8_t *telo_ends;
     uint32_t wd;
     double q_drop, d_mass_frac;
@@ -771,7 +774,8 @@ int main(int argc, char *argv[])
     q_drop = 0.1;
     d_min_cell = 30;
     d_mass_frac = 0.99;
-    binary_only = 0;
+    convert_binary = 0;
+    print_telomotifs = 0;
     f_type = NOSET;
     is_long_help = 0;
 
@@ -833,9 +837,11 @@ int main(int argc, char *argv[])
         } else if (c == 311) {
             rl = atoi(opt.arg);
         } else if (c == 312) {
-            binary_only = 1;
-        } else if (c == 313) {
             telo_motif = opt.arg;
+        } else if (c == 313) {
+            print_telomotifs = 1;
+        } else if (c == 314) {
+            convert_binary = 1;
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
         } else if (c == 'V') {
@@ -859,6 +865,12 @@ int main(int argc, char *argv[])
 
     if (fp_help == stdout) {
         print_help(stdout, is_long_help);
+        return 0;
+    }
+
+    if (print_telomotifs) {
+        fprintf(stderr, "[I::%s] telomeric motifs in the database:\n", __func__);
+        list_telo_motifs(stderr);
         return 0;
     }
 
@@ -1032,7 +1044,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "[I::%s] dump hic links (PA5) to binary file %s\n", __func__, link_bin_file);
         dump_links_from_pa5_file(link_file, fai, ml, 0, rl, wd, q_drop, link_bin_file);
     } else if (f_type == BIN) {
-        if (binary_only) {
+        if (convert_binary) {
             fprintf(stderr, "[E::%s] Input is already in BIN format\n", __func__);
             exit(EXIT_FAILURE);
         }
@@ -1069,7 +1081,7 @@ int main(int argc, char *argv[])
     fprintf(stderr, "[DEBUG_OPTIONS::%s] ec[S]: %d\n", __func__, no_scaffold_ec);
 #endif
 
-    if (binary_only) goto final_clean;
+    if (convert_binary) goto final_clean;
 
     ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, rr, re_cuts, telo_ends, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
     
