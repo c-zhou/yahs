@@ -40,6 +40,7 @@
 #include "sdict.h"
 #include "enzyme.h"
 #include "link.h"
+#include "cov.h"
 #include "asset.h"
 
 #undef DEBUG_NOISE
@@ -639,7 +640,7 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, cov_norm_t *cov_norm, 
     return link_mat;
 }
 
-cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict, uint32_t window)
+cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict)
 {
     uint32_t i;
     uint64_t m, n;
@@ -667,13 +668,13 @@ cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict, uint32_t window)
     norm = (double **) malloc(sizeof(double *) * dict->n);
     norm[0] = norm_a;
     for (i = 1; i < dict->n; ++i)
-        norm[i] = norm[i-1] + div_ceil(dict->s[i-1].len, window);
+        norm[i] = norm[i-1] + div_ceil(dict->s[i-1].len, COV_NORM_WINDOW);
     
     fclose(fp);
     
     cov_norm = (cov_norm_t *) malloc(sizeof(cov_norm_t));
     cov_norm->n = n;
-    cov_norm->w = window;
+    cov_norm->w = COV_NORM_WINDOW;
     cov_norm->norm = norm;
 
     return cov_norm;
@@ -1266,7 +1267,7 @@ static int parse_bam_rec1(bam1_t *b, bam_header_t *h, char **cname0, int32_t *s0
     return (b->core.flag & 0x40)? 1 : 0;
 }
 
-void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
+void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, double q_drop, const char *out)
 {
     bamFile fp;
     FILE *fo;
@@ -1511,7 +1512,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 
     // cov_t *cov = bam_cstats(f, dict, 0);
-    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, q_drop);
     fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
     fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
     cov_destroy(cov);
@@ -1521,7 +1522,7 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     fclose(fo);
 }
 
-void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t wd, double q_drop, const char *out)
+void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, double q_drop, const char *out)
 {
     FILE *fp, *fo;
     int fd;
@@ -1674,7 +1675,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 
     // cov_t *cov = bed_cstats(f, dict);
-    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, q_drop);
     fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
     fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
     cov_destroy(cov);
@@ -1684,7 +1685,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     fclose(fo);
 }
 
-void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t rl, uint32_t wd, double q_drop, const char *out)
+void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t rl, double q_drop, const char *out)
 {
     FILE *fp, *fo;
     int fd;
@@ -1817,7 +1818,7 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
     fprintf(stderr, "[I::%s] dumped %lu read pairs from %lu records: %lu intra links + %lu inter links \n", __func__, pair_c, rec_c, intra_c, inter_c);
 
     // cov_t *cov = bed_cstats(f, dict);
-    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, wd, q_drop);
+    cov_norm_t *cov_norm = calc_cov_norms(cov, dict, q_drop);
     fwrite(&cov_norm->n, sizeof(uint64_t), 1, fo);
     fwrite(cov_norm->norm[0], sizeof(double), cov_norm->n, fo);
     cov_destroy(cov);

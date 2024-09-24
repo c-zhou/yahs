@@ -411,7 +411,7 @@ double calc_avg_cov(cov_t *cov, sdict_t *sdict, double q_drop)
     return avg_cov;
 }
 
-cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q_drop)
+cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, double q_drop)
 {
     size_t i, j, k, s;
     int32_t c;
@@ -424,12 +424,12 @@ cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q
     n = sdict->n;
     m = 0;
     for (i = 0; i < n; ++i)
-        m += div_ceil(sdict->s[i].len, window);
+        m += div_ceil(sdict->s[i].len, COV_NORM_WINDOW);
     norm_a = (double *) calloc(m, sizeof(double));
     norm = (double **) calloc(n, sizeof(double *));
     norm[0] = norm_a;
     for (i = 1; i < n; ++i) 
-        norm[i] = norm[i-1] + div_ceil(sdict->s[i-1].len, window);
+        norm[i] = norm[i-1] + div_ceil(sdict->s[i-1].len, COV_NORM_WINDOW);
 
     // calculate average base coverage
     avg_cov = calc_avg_cov(cov, sdict, q_drop);
@@ -441,16 +441,16 @@ cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q
         for (j = 0; j < s; ++j) {
             p1 = (uint32_t) (a[j] >> 32);
             if (p1 > p) {
-                if (p1 - p < window - w) {
+                if (p1 - p < COV_NORM_WINDOW - w) {
                     c1 += (int64_t) c * (p1 - p);
                     w += p1 - p;
                     p = p1;
                 } else {
                     while (p1 > p) {
-                        if (p1 - p >= window - w) {
-                            c1 += (int64_t) c * (window - w);
-                            norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * window / c1 : DBL_MAX);
-                            p += window - w;
+                        if (p1 - p >= COV_NORM_WINDOW - w) {
+                            c1 += (int64_t) c * (COV_NORM_WINDOW - w);
+                            norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * COV_NORM_WINDOW / c1 : DBL_MAX);
+                            p += COV_NORM_WINDOW - w;
                             c1 = 0;
                             w = 0;
                         } else {
@@ -466,9 +466,9 @@ cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q
 
         p1 = sdict->s[i].len;
         while (p1 > p) {
-            if (p1 - p >= window - w) {
-                norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * window / c1 : DBL_MAX);
-                p += window - w;
+            if (p1 - p >= COV_NORM_WINDOW - w) {
+                norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * COV_NORM_WINDOW / c1 : DBL_MAX);
+                p += COV_NORM_WINDOW - w;
             } else {
                 norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * (p1 - p + w) / c1 : DBL_MAX);
                 p = p1;
@@ -480,12 +480,12 @@ cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q
         if (w > 0)
             norm[i][k++] = MIN(max_cov_scale, c1 > 0? avg_cov * w / c1 : DBL_MAX);
         
-        assert(k == div_ceil(p1, window));
+        assert(k == div_ceil(p1, COV_NORM_WINDOW));
     }
     
     cov_norm = (cov_norm_t *) malloc(sizeof(cov_norm_t));
     cov_norm->n = m;
-    cov_norm->w = window;
+    cov_norm->w = COV_NORM_WINDOW;
     cov_norm->norm = norm;
 
     return cov_norm;

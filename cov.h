@@ -53,6 +53,8 @@ typedef struct {
     double **norm;
 } cov_norm_t;
 
+#define COV_NORM_WINDOW 1000
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -64,7 +66,7 @@ uint64_t pos_compression(cov_t *cov);
 cov_t *bam_cstats(const char *bam, sdict_t *sdict, int match_header);
 cov_t *bed_cstats(const char *bed, sdict_t *sdict);
 double calc_avg_cov(cov_t *cov, sdict_t *sdict, double q_drop);
-cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, uint32_t window, double q_drop);
+cov_norm_t *calc_cov_norms(cov_t *cov, sdict_t *sdict, double q_drop);
 void print_cov_in_bed(cov_t *cov, sdict_t *sdict, FILE *fo);
 
 #ifdef __cplusplus

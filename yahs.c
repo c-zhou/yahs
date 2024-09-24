@@ -198,7 +198,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
         fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, (double) rss_limit / GB);
         fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, (double) rss_intra / GB);
         re = ENOMEM_ERR;
-        goto scaff_done;
+        goto scaff_failed_0;
     }
     rss_limit -= rss_intra;
     fprintf(stderr, "[I::%s] starting norm estimation...\n", __func__);
@@ -213,9 +213,8 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     norm_t *norm = calc_norms(intra_link_mat, d_min_cell, d_mass_frac);
     if (norm == 0) {
         fprintf(stderr, "[W::%s] No enough bands for norm calculation... End of scaffolding round.\n", __func__);
-        intra_link_mat_destroy(intra_link_mat);
         re = ENOBND_ERR;
-        goto scaff_done;
+        goto scaff_failed_1;
     }
 
     rss_inter = no_mem_check? 0 : estimate_inter_link_mat_init_rss(dict, resolution, norm->r);
@@ -225,7 +224,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
         fprintf(stderr, "[I::%s] RAM    limit: %.3fGB\n", __func__, (double) rss_limit / GB);
         fprintf(stderr, "[I::%s] RAM required: %.3fGB\n", __func__, (double) rss_inter / GB);
         re = ENOMEM_ERR;
-        goto scaff_done;
+        goto scaff_failed_1;
     }
     rss_limit -= rss_inter;
     fprintf(stderr, "[I::%s] starting link estimation...\n", __func__);
@@ -242,8 +241,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     double la;
     re = inter_link_norms(inter_link_mat, norm, 1, max_noise_ratio, &la);
     if (re) {
-        inter_link_mat_destroy(inter_link_mat);
-        goto scaff_done;
+        goto scaff_failed_2;
     }
 
     int8_t *directs = 0;
@@ -310,7 +308,7 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
 
     asm_dict_t *d = make_asm_dict_from_graph(g, g->sdict);
     // write scaffolds to AGP file
-    FILE *agp_out;
+    FILE *agp_out = NULL;
     if (out) {
         char *agp_out_name = (char *) malloc(strlen(out) + 5);
         sprintf(agp_out_name, "%s.agp", out);
@@ -321,19 +319,23 @@ int run_scaffolding(char *fai, char *agp, char *link_file, cov_norm_t *cov_norm,
     }
     if (agp_out == NULL) {
         fprintf(stderr, "[E::%s] fail to open file to write\n", __func__);
-        return 0;
+        re = 1;
+    } else {
+        write_asm_dict_to_agp(d, agp_out);
+        fclose(agp_out);
     }
-    write_asm_dict_to_agp(d, agp_out);
-    fclose(agp_out);
-    
-    asm_destroy(d);
 
-    intra_link_mat_destroy(intra_link_mat);
-    inter_link_mat_destroy(inter_link_mat);
-    norm_destroy(norm);
+    asm_destroy(d);
     graph_destroy(g);
-    
-scaff_done:
+
+scaff_failed_2:
+    inter_link_mat_destroy(inter_link_mat);
+
+scaff_failed_1:
+    norm_destroy(norm);
+    intra_link_mat_destroy(intra_link_mat);
+
+scaff_failed_0:
     asm_destroy(dict);
     sd_destroy(sdict);
 
@@ -446,7 +448,7 @@ static void print_asm_stats(uint64_t *n_stats, uint32_t *l_stats, int all)
 #endif
 }
 
-int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uint32_t wd, char *out, int *resolutions, int nr, int rr, re_cuts_t *re_cuts, int8_t *telo_ends, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
+int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, char *out, int *resolutions, int nr, int rr, re_cuts_t *re_cuts, int8_t *telo_ends, uint32_t d_min_cell, double d_mass_frac, int no_contig_ec, int no_scaffold_ec, int no_mem_check)
 {
     int ec_round, resolution, re, r, rn, rc, ex;
     uint64_t n50;
@@ -468,8 +470,6 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
     out_fn = (char *) malloc(strlen(out) + 35);
     out_agp = (char *) malloc(strlen(out) + 35);
     out_agp_break = (char *) malloc(strlen(out) + 35);
-
-    cov_norm = cov_norm_from_file(link_file, sdict, wd);
     
     if (no_contig_ec == 0) {
 #ifdef DEBUG
@@ -520,6 +520,8 @@ int run_yahs(char *fai, char *agp, char *link_file, uint32_t ml, uint8_t mq, uin
     asm_sd_stats(dict, n_stats, l_stats);
     print_asm_stats(n_stats, l_stats, 1);
     asm_destroy(dict);
+
+    cov_norm = cov_norm_from_file(link_file, sdict);
 
     r = rc = 0;
     rn = rr;
@@ -696,22 +698,27 @@ static void print_help(FILE *fp_help, int is_long_help)
     fprintf(fp_help, "    -e STR                 restriction enzyme cutting sites [none]\n");
     fprintf(fp_help, "    -l INT                 minimum length of a contig to scaffold [0]\n");
     fprintf(fp_help, "    -q INT                 minimum mapping quality [10]\n");
-    if (is_long_help) {
-        fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
-        fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
-        fprintf(fp_help, "    --seq-ctype   STR      AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
-        fprintf(fp_help, "    --gap-ctype   STR      AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
-        fprintf(fp_help, "    --gap-link    STR      AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
-        fprintf(fp_help, "    --gap-size    INT      AGP output gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
-        fprintf(fp_help, "    --convert-to-binary    make a binary ouput file from the input and exit\n");
-        fprintf(fp_help, "    --print-telo-motifs    print telomeric motifs in the database and exit\n");
-    }
+    fprintf(fp_help, "\n");
     fprintf(fp_help, "    --no-contig-ec         do not do contig error correction\n");
     fprintf(fp_help, "    --no-scaffold-ec       do not do scaffold error correction\n");
     fprintf(fp_help, "    --no-mem-check         do not do memory check at runtime\n");
     fprintf(fp_help, "    --file-type   STR      input file type BED|BAM|PA5|BIN, file name extension is ignored if set\n");
     fprintf(fp_help, "    --read-length          read length (required for PA5 format input) [150]\n");
     fprintf(fp_help, "    --telo-motif  STR      telomeric sequence motif\n");
+    if (is_long_help) {
+        fprintf(fp_help, "\n");
+        fprintf(fp_help, "    --D-min-cells INT      minimum number of cells to calculate the distance threshold [30]\n");
+        fprintf(fp_help, "    --D-mass-frac FLOAT    fraction of HiC signals to calculate the distance threshold [0.99]\n");
+        fprintf(fp_help, "\n");
+        fprintf(fp_help, "    --seq-ctype   STR      AGP output sequence component type [%s]\n", agp_component_type_val(DEFAULT_AGP_SEQ_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-ctype   STR      AGP output gap component type [%s]\n", agp_component_type_val(DEFAULT_AGP_GAP_COMPONENT_TYPE));
+        fprintf(fp_help, "    --gap-link    STR      AGP output gap linkage evidence [%s]\n", agp_linkage_evidence_val(DEFAULT_AGP_LINKAGE_EVIDENCE));
+        fprintf(fp_help, "    --gap-size    INT      AGP output gap size between sequence component [%d]\n", DEFAULT_AGP_GAP_SIZE);
+        fprintf(fp_help, "\n");
+        fprintf(fp_help, "    --convert-to-binary    make a binary ouput file from the input and exit\n");
+        fprintf(fp_help, "    --print-telo-motifs    print telomeric motifs in the database and exit\n");
+    }
+    fprintf(fp_help, "\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
     fprintf(fp_help, "    -v INT                 verbose level [%d]\n", VERBOSE);
     fprintf(fp_help, "    -?                     print long help with extra option list\n");
@@ -754,7 +761,6 @@ int main(int argc, char *argv[])
     int *resolutions, nr, rr, mq, ml, rl;
     int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, convert_binary;
     int8_t *telo_ends;
-    uint32_t wd;
     double q_drop, d_mass_frac;
     enum fileTypes f_type;
 
@@ -770,7 +776,6 @@ int main(int argc, char *argv[])
     ml = 0;
     rl = 150;
     ecstr = 0;
-    wd = 1000;
     q_drop = 0.1;
     d_min_cell = 30;
     d_mass_frac = 0.99;
@@ -1032,17 +1037,17 @@ int main(int argc, char *argv[])
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BAM) to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bam_file(link_file, fai, ml, 0, wd, q_drop, link_bin_file);
+        dump_links_from_bam_file(link_file, fai, ml, 0, q_drop, link_bin_file);
     } else if (f_type == BED) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (BED) to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_bed_file(link_file, fai, ml, 0, wd, q_drop, link_bin_file);
+        dump_links_from_bed_file(link_file, fai, ml, 0, q_drop, link_bin_file);
     } else if (f_type == PA5) {
         link_bin_file = malloc(strlen(out) + 5);
         sprintf(link_bin_file, "%s.bin", out);
         fprintf(stderr, "[I::%s] dump hic links (PA5) to binary file %s\n", __func__, link_bin_file);
-        dump_links_from_pa5_file(link_file, fai, ml, 0, rl, wd, q_drop, link_bin_file);
+        dump_links_from_pa5_file(link_file, fai, ml, 0, rl, q_drop, link_bin_file);
     } else if (f_type == BIN) {
         if (convert_binary) {
             fprintf(stderr, "[E::%s] Input is already in BIN format\n", __func__);
@@ -1083,7 +1088,7 @@ int main(int argc, char *argv[])
 
     if (convert_binary) goto final_clean;
 
-    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, wd, out, resolutions, nr, rr, re_cuts, telo_ends, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
+    ret = run_yahs(fai, agp, link_bin_file, ml, mq8, out, resolutions, nr, rr, re_cuts, telo_ends, d_min_cell, d_mass_frac, no_contig_ec, no_scaffold_ec, no_mem_check);
     
     if (ret == 0) {
         agp_final = (char *) malloc(strlen(out) + 35);
