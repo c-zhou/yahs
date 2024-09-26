@@ -65,6 +65,7 @@ cov_t *cov_init(uint32_t n)
 
 void cov_destroy(cov_t* cov)
 {
+    if (!cov) return;
     uint32_t i;
     for (i = 0; i < cov->n; ++i)
         kv_destroy(cov->p[i]);
@@ -76,11 +77,10 @@ void cov_destroy(cov_t* cov)
 
 void cov_norm_destroy(cov_norm_t *cov_norm)
 {
-    if (cov_norm) {
-        free(cov_norm->norm[0]);
-        free(cov_norm->norm);
-        free(cov_norm);
-    }
+    if (!cov_norm) return;
+    free(cov_norm->norm[0]);
+    free(cov_norm->norm);
+    free(cov_norm);
 
     return;
 }

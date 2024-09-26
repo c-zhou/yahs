@@ -58,6 +58,7 @@ KHASH_SET_INIT_STR(str)
 
 void intra_link_mat_destroy(intra_link_mat_t *link_mat)
 {
+    if (!link_mat) return;
     uint32_t i;
     for (i = 0; i < link_mat->n; ++i)
         if (link_mat->links[i].n)
@@ -69,6 +70,7 @@ void intra_link_mat_destroy(intra_link_mat_t *link_mat)
 
 void inter_link_mat_destroy(inter_link_mat_t *link_mat)
 {
+    if (!link_mat) return;
     uint32_t i, j;
     for (i = 0; i < link_mat->n; ++i) {
         if (link_mat->links[i].n) {
@@ -682,6 +684,7 @@ cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict)
 
 void norm_destroy(norm_t *norm)
 {
+    if (!norm) return;
     //uint32_t i;
     free(norm->bs);
     //for (i = 0; i < norm->n; ++i)

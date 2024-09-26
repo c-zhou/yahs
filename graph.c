@@ -51,6 +51,7 @@ graph_t *graph_init(void)
 
 void graph_destroy(graph_t *g)
 {
+    if (!g) return;
     if (g == 0)
         return;
     if (g->arc)

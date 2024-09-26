@@ -81,6 +81,7 @@ asm_dict_t *asm_init(sdict_t *sdict)
 
 void sd_destroy(sdict_t *d)
 {
+    if (!d) return;
     uint32_t i;
     if (d == 0)
         return;
@@ -99,6 +100,7 @@ void sd_destroy(sdict_t *d)
 
 void asm_destroy(asm_dict_t *d)
 {
+    if (!d) return;
     uint32_t i;
     if (d == 0)
         return;

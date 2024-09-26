@@ -57,6 +57,7 @@ re_cuts_t *re_cuts_init(uint32_t n)
 
 void re_cuts_destroy(re_cuts_t *re_cuts)
 {
+    if (!re_cuts) return;
     uint32_t i;
     for (i = 0; i < re_cuts->n; ++i)
         if (re_cuts->re[i].sites)

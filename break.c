@@ -69,6 +69,7 @@ link_mat_t *link_mat_init(asm_dict_t *dict, uint32_t b)
 
 void link_mat_destroy(link_mat_t *link_mat)
 {
+    if (!link_mat) return;
     uint32_t i;
     for (i = 0; i < link_mat->n; ++i)
         free(link_mat->link[i].link);
