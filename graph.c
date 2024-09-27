@@ -153,10 +153,8 @@ void graph_arc_index(graph_t *g)
 
 graph_t *read_graph_from_gfa(char *gfa)
 {
-    FILE *fp;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char c0[1024], c1[1024], s0[4], s1[4], wts[1024];
     double wt;
 
@@ -164,22 +162,20 @@ graph_t *read_graph_from_gfa(char *gfa)
     g = graph_init();
     g->sdict = make_asm_dict_from_sdict(make_sdict_from_gfa(gfa, 0));
     
-    fp = fopen(gfa, "r");
+    fp = iostream_open(gfa);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, gfa);
         exit(EXIT_FAILURE);
     }
 
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (line[0] == 'L') {
             sscanf(line, "%*s %s %s %s %s %*s %s", c0, s0, c1, s1, wts);
             wt = strtof(wts + 5, NULL);
             graph_add_arc(g, (asm_sd_get(g->sdict, c0)<<1) | (s0[0]=='-'), (asm_sd_get(g->sdict, c1)<<1) | (s1[0]=='-'), -1, 0, wt);
         }
     }
-    if (line)
-        free(line);
-    fclose(fp);
+    iostream_close(fp);
 
     graph_arc_sort(g);
     graph_arc_index(g);

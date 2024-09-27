@@ -38,9 +38,6 @@
 #include "cov.h"
 #include "asset.h"
 
-void *kopen(const char *fn, int *_fd);
-int kclose(void *a);
-
 KHASH_SET_INIT_STR(str)
 
 // read unmapped (0x4)
@@ -238,11 +235,7 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     uint32_t i, s, e;
     uint64_t n, m, max_m, n_recs;
     char *line, cname[4096];
-    size_t ln = 0;
-    ssize_t read;
-    FILE *fp;
-    int fd;
-    void *fh;
+    iostream_t *fp;
     cov_t *covs;
     
     khash_t(str) *hmseq; // for absent sequences
@@ -250,8 +243,7 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     int absent;
     hmseq = kh_init(str);
 
-    fh = kopen(bed, &fd);
-    fp = fdopen(fd, "r");
+    fp = iostream_open(bed);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, bed);
         exit(EXIT_FAILURE);
@@ -262,7 +254,9 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
     n_recs = 0;
     n = 0;
     line = 0;
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
+        if (is_empty_line(line))
+            continue;
         ++n_recs;
         if (n_recs % 1000000 == 0)
             fprintf(stderr, "[I::%s] %lu million records processed\n", __func__, n_recs / 1000000);
@@ -300,10 +294,7 @@ cov_t *bed_cstats(const char *bed, sdict_t *sdict)
         free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
-    if (line)
-        free(line);
-    fclose(fp);
-    kclose(fh);
+    iostream_close(fp);
 
     return covs;
 }

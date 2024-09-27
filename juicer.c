@@ -42,9 +42,6 @@ static double jc_realtime0;
 
 enum fileTypes{NOSET, BED, BAM, BIN, PA5};
 
-void *kopen(const char *fn, int *_fd);
-int kclose(void *a);
-
 KHASH_SET_INIT_STR(str)
 
 static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
@@ -115,12 +112,8 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
 
 static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t mq, int scale, int count_gap, FILE *fo)
 {
-    FILE *fp;
-    int fd;
-    void *fh;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1;
     uint64_t p0, p1, rec_c, pair_c;
@@ -136,8 +129,7 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
     sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
 
-    fh = kopen(f, &fd);
-    fp = fdopen(fd, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -145,8 +137,10 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
 
     rec_c = pair_c = 0;
     buff = 0;
-    while ((read = getline(&line, &ln, fp)) != -1) {
-    
+    while ((line = iostream_getline(fp)) != NULL) {
+        if (is_empty_line(line))
+            continue;
+        
         if (++rec_c % 1000000 == 0)
             fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
@@ -219,10 +213,7 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
             free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
-    if (line)
-        free(line);
-    fclose(fp);
-    kclose(fh);
+    iostream_close(fp);
     asm_destroy(dict);
     sd_destroy(sdict);
 
@@ -231,12 +222,8 @@ static int make_juicer_pre_file_from_bed(char *f, char *agp, char *fai, uint8_t 
 
 static int make_juicer_pre_file_from_pa5(char *f, char *agp, char *fai, int8_t mq, int scale, int count_gap, FILE *fo)
 {
-    FILE *fp;
-    int fd;
-    void *fh;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char cname0[4096], cname1[4096];
     uint32_t x0, x1, i0, i1;
     uint64_t p0, p1, rec_c, pair_c;
@@ -251,16 +238,17 @@ static int make_juicer_pre_file_from_pa5(char *f, char *agp, char *fai, int8_t m
     sdict_t *sdict = make_sdict_from_index(fai, 0);
     asm_dict_t *dict = agp? make_asm_dict_from_agp(sdict, agp, 1) : make_asm_dict_from_sdict(sdict);
 
-    fh = kopen(f, &fd);
-    fp = fdopen(fd, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
     }
 
     rec_c = pair_c = 0;
-    while ((read = getline(&line, &ln, fp)) != -1) {
-
+    while ((line = iostream_getline(fp)) != NULL) {
+        if (is_empty_line(line))
+            continue;
+        
         if (++rec_c % 1000000 == 0)
             fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
@@ -312,10 +300,7 @@ static int make_juicer_pre_file_from_pa5(char *f, char *agp, char *fai, int8_t m
             free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
-    if (line)
-        free(line);
-    fclose(fp);
-    kclose(fh);
+    iostream_close(fp);
     asm_destroy(dict);
     sd_destroy(sdict);
 
@@ -620,7 +605,7 @@ static ko_longopt_t long_options[] = {
 static int main_pre(int argc, char *argv[])
 {
     FILE *fo;
-    char *fai, *agp, *agp1, *link_file, *out, *out1, *annot, *lift, *ext;
+    char *fai, *agp, *agp1, *link_file, *out, *out1, *annot, *lift, *ext1, *ext2;
     int mq, asm_mode;;
     enum fileTypes f_type;
 
@@ -699,18 +684,19 @@ static int main_pre(int argc, char *argv[])
     fai = argv[opt.ind + 2];
 
     if (f_type == NOSET) {
-        ext = link_file + strlen(link_file) - 4;
-        if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
-        else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
-        else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
-        else if (strcasecmp(ext, ".pa5") == 0) f_type = PA5;
+        ext1 = strlen(link_file) >= 4? (link_file + strlen(link_file) - 4) : NULL;
+        ext2 = strlen(link_file) >= 7? (link_file + strlen(link_file) - 7) : NULL;
+        if (ext1 && !strcasecmp(ext1, ".bam")) f_type = BAM;
+        else if (ext1 && !strcasecmp(ext1, ".bin")) f_type = BIN;
+        else if ((ext1 && !strcasecmp(ext1, ".bed")) || (ext2 && !strcasecmp(ext2, ".bed.gz"))) f_type = BED;
+        else if ((ext1 && !strcasecmp(ext1, ".pa5")) || (ext2 && !strcasecmp(ext2, ".pa5.gz"))) f_type = PA5;
         else {
             fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed, .pa5 or .bin or --file-type is expected\n", __func__);
             exit(EXIT_FAILURE);
         }
     }
-
-    if (f_type == BIN && (*link_file == '-' || *link_file == '<')) {
+    
+    if (f_type == BIN && (strcmp(link_file, "-") == 0 || *link_file == '<')) {
         fprintf(stderr, "[E::%s] BIN file format from STDIN is not supported\n", __func__);
         exit(EXIT_FAILURE);
     }
@@ -814,33 +800,19 @@ static int main_pre(int argc, char *argv[])
     return ret;
 }
 
-static int is_empty_line(char *line)
-{
-    char *c;
-    c = line;
-    while (isspace((unsigned char) *c))
-        c++;
-    if(*c == 0)
-        return 1;
-    return 0;
-}
-
 static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
 {
     asm_dict_t *dict;
-    FILE *fp;
-
-    dict = make_asm_dict_from_agp(sdict, lift, 1);
-    
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char cname[1024], c0[1024], c1[1024], *cstr;
     int32_t cid, sid, fid, sign;
     uint32_t i, clen, mlen, s, p, *coords;
     int64_t slen;
     size_t m;
     kvec_t(int) segs;
+
+    dict = make_asm_dict_from_agp(sdict, lift, 1);
 
     m = 4;
     coords = (uint32_t *) malloc(sizeof(uint32_t) * m * 3);
@@ -849,12 +821,12 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
     sid = 0;
     kv_init(segs);
 
-    fp = fopen(assembly, "r");
+    fp = iostream_open(assembly);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
         exit(EXIT_FAILURE);
     }
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line) || line[0] != '>')
             continue;
         
@@ -890,14 +862,14 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
         coords[cid * 3 + 1] = p + 1; // 0-based to 1-based coordinates
         coords[cid * 3 + 2] = clen;
     }
-    fclose(fp);
+    iostream_close(fp);
 
-    fp = fopen(assembly, "r");
+    fp = iostream_open(assembly);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, assembly);
         exit(EXIT_FAILURE);
     }
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line) || line[0] == '>')
             continue;
 
@@ -936,9 +908,8 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
             }
         }
     }
-    fclose(fp);
+    iostream_close(fp);
 
-    free(line);
     free(coords);
     kv_destroy(segs);
     asm_destroy(dict);
@@ -1088,6 +1059,10 @@ int main(int argc, char *argv[])
         return usage(stderr);
     if (strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0)
         return usage(stdout);
+    if (strcmp(argv[1], "-V") == 0 || strcmp(argv[1], "--version") == 0) {
+        puts(JUICER_VERSION);
+        return 0;
+    }
     if (strcmp(argv[1], "pre") == 0)
         return main_pre(argc - 1, argv + 1);
     if (strcmp(argv[1], "post") == 0)

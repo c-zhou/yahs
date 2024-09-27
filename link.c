@@ -51,9 +51,6 @@
 #define MIN_RE_DENS .1
 static uint32_t MAX_RADIUS = 100;
 
-void *kopen(const char *fn, int *_fd);
-int kclose(void *a);
-
 KHASH_SET_INIT_STR(str)
 
 void intra_link_mat_destroy(intra_link_mat_t *link_mat)
@@ -1527,12 +1524,9 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
 
 void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, double q_drop, const char *out)
 {
-    FILE *fp, *fo;
-    int fd;
-    void *fh;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    FILE *fo;
+    iostream_t *fp;
+    char *line;
     char cname0[4096], cname1[4096], rname0[4096], rname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     uint8_t q, q0, q1;
@@ -1547,8 +1541,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
     sdict_t *dict = make_sdict_from_index(fai, ml);
 
-    fh = kopen(f, &fd);
-    fp = fdopen(fd, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -1570,8 +1563,10 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
 
-    while ((read = getline(&line, &ln, fp)) != -1) {
-        
+    while ((line = iostream_getline(fp)) != NULL) {
+        if (is_empty_line(line))
+            continue;
+
         if (++rec_c % 1000000 == 0)
             fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
@@ -1666,10 +1661,7 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
             free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
-    if (line)
-        free(line);
-    fclose(fp);
-    kclose(fh);
+    iostream_close(fp);
     // write pair number
     fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
@@ -1690,12 +1682,9 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
 
 void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8_t mq, uint32_t rl, double q_drop, const char *out)
 {
-    FILE *fp, *fo;
-    int fd;
-    void *fh;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    FILE *fo;
+    iostream_t *fp;
+    char *line;
     char cname0[4096], cname1[4096];
     uint32_t s0, s1, e0, e1, i0, i1, p0, p1;
     uint8_t q, q0, q1;
@@ -1709,8 +1698,7 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
 
     sdict_t *dict = make_sdict_from_index(fai, ml);
 
-    fh = kopen(f, &fd);
-    fp = fdopen(fd, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -1732,7 +1720,9 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
 
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);
 
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
+        if (is_empty_line(line))
+            continue;
 
         if (++rec_c % 1000000 == 0)
             fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
@@ -1809,10 +1799,7 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
             free((char *) kh_key(hmseq, k));
     kh_destroy(str, hmseq);
 
-    if (line)
-        free(line);
-    fclose(fp);
-    kclose(fh);
+    iostream_close(fp);
     // write pair number
     fseek(fo, sizeof(uint64_t) + sd_l, SEEK_SET);
     fwrite(&pair_c, sizeof(uint64_t), 1, fo);

@@ -32,6 +32,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <zlib.h>
 
 #define SWAP(T, x, y) {T tmp = x; x = y; y = tmp;}
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
@@ -41,6 +42,15 @@
 #define BIN_H 0x5941485342494E56
 #define BIN_V 0x2
 #define strcasecmp(s1, s2) strcmp_case_insensitive(s1, s2)
+
+typedef struct {
+    int fd;
+    gzFile fp;
+    void *stream;
+    void *buffer;
+    void *koaux;
+    int64_t nline;
+} iostream_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -59,6 +69,10 @@ void write_bin_header(FILE *fo);
 int is_valid_bin_header(int64_t magic_number);
 int strcmp_case_insensitive(const char *s1, const char *s2);
 void positive_or_die(int num);
+int is_empty_line(char *line);
+iostream_t *iostream_open(const char *spath);
+void iostream_close(iostream_t *iostream);
+char *iostream_getline(iostream_t *iostream);
 #ifdef __cplusplus
 }
 #endif

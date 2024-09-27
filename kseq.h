@@ -90,7 +90,7 @@
 	static inline int ks_seek(kstream_t *ks, long int offset, int whence) \
 	{ \
 		ks_rewind(ks); \
-		__seek(ks->f, offset, whence); \
+		return __seek(ks->f, offset, whence); \
 	}
 
 #ifndef KSTRING_T

@@ -214,27 +214,14 @@ sdict_t *make_sdict_from_fa(const char *f, uint32_t min_len)
     return d;
 }
 
-static int is_empty_line(char *line)
-{
-    char *c;
-    c = line;
-    while (isspace((unsigned char) *c))
-        c++;
-    if(*c == 0)
-        return 1;
-    return 0;
-}
-
 sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
 {
-    FILE *fp;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char name[4096];
     int64_t len;
 
-    fp = fopen(f, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -242,7 +229,7 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
     
     sdict_t *d;
     d = sd_init();
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line))
             continue;
         sscanf(line, "%s %ld", name, &len);
@@ -253,22 +240,19 @@ sdict_t *make_sdict_from_index(const char *f, uint32_t min_len)
         if (len >= min_len)
             sd_put(d, name, len);
     }
-    if (line)
-        free(line);
-    fclose(fp);
+
+    iostream_close(fp);
     return d;
 }
 
 sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
 {
-    FILE *fp;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char name[4096], lens[4096];
     uint64_t len;
 
-    fp = fopen(f, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -276,7 +260,7 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
 
     sdict_t *d;
     d = sd_init();
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line))
             continue;
         if (line[0] == 'S') {
@@ -290,9 +274,7 @@ sdict_t *make_sdict_from_gfa(const char *f, uint32_t min_len)
                 sd_put(d, name, len);
         }
     }
-    if (line)
-        free(line);
-    fclose(fp);
+    iostream_close(fp);
 
     return d;
 }
@@ -421,10 +403,8 @@ void asm_index(asm_dict_t *d)
 
 asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unknown_oris)
 {
-    FILE *fp;
-    char *line = NULL;
-    size_t ln = 0;
-    ssize_t read;
+    iostream_t *fp;
+    char *line;
     char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[64];
     char *name = NULL;
     uint64_t a, b;
@@ -432,7 +412,7 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unkn
     uint32_t c, s, n;
     kvec_t(uint32_t) gs, gsize, gcomp, gtype, glink, gevid;
 
-    fp = fopen(f, "r");
+    fp = iostream_open(f);
     if (fp == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, f);
         exit(EXIT_FAILURE);
@@ -449,7 +429,7 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unkn
     kv_init(gtype);
     kv_init(glink);
     kv_init(gevid);
-    while ((read = getline(&line, &ln, fp)) != -1) {
+    while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line) || !strncmp(line, "#", 1))
             // header or empty lines
             continue;
@@ -532,11 +512,9 @@ asm_dict_t *make_asm_dict_from_agp(sdict_t *sdict, const char *f, int allow_unkn
 #endif
     asm_index(d);
 
-    fclose(fp);
-    if (line)
-        free(line);
     if (name)
         free(name);
+    iostream_close(fp);
     kv_destroy(gs);
     kv_destroy(gsize);
     kv_destroy(gcomp);
@@ -718,18 +696,16 @@ char nucl_toupper[] = {
 // this can now be done in two steps: first read AGP file to an assembly dictionary and then write to a FASTA file
 void _write_fasta_file_from_agp_(const char *fa, const char *agp, FILE *fo, int line_wd, int allow_unknown_oris)
 {
-    FILE *agp_in;
-    char *line = NULL;
+    iostream_t *agp_in;
+    char *line;
     sdict_t *dict;
     sd_seq_t s;
-    size_t ln = 0;
-    ssize_t read;
     char sname[256], type[4], cname[256], cstarts[16], cends[16], oris[256];
     char *name = NULL;
     uint32_t c;
     int64_t i, l, cstart, cend, ns, L;
 
-    agp_in = fopen(agp, "r");
+    agp_in = iostream_open(agp);
     if (agp_in == NULL) {
         fprintf(stderr, "[E::%s] cannot open file %s for reading\n", __func__, agp);
         exit(EXIT_FAILURE);
@@ -737,7 +713,7 @@ void _write_fasta_file_from_agp_(const char *fa, const char *agp, FILE *fo, int 
 
     dict = make_sdict_from_fa(fa, 0);
     l = L = ns = 0;
-    while ((read = getline(&line, &ln, agp_in)) != -1) {
+    while ((line = iostream_getline(agp_in)) != NULL) {
         if (is_empty_line(line) || !strncmp(line, "#", 1))
             // header or empty lines
             continue;
@@ -812,10 +788,9 @@ void _write_fasta_file_from_agp_(const char *fa, const char *agp, FILE *fo, int 
     fprintf(stderr, "[I::%s] Number sequences: %ld\n", __func__, ns);
     fprintf(stderr, "[I::%s] Number bases: %ld\n", __func__, L);
 
-    if (line)
-        free(line);
-    free(name);
-    fclose(agp_in);
+    if (name) 
+        free(name);
+    iostream_close(agp_in);
     sd_destroy(dict);
 }
 

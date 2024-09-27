@@ -757,7 +757,7 @@ int main(int argc, char *argv[])
     liftrlimit();
     ys_realtime0 = realtime();
 
-    char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext, *link_bin_file, *agp_final, *fa_final;
+    char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext1, *ext2, *link_bin_file, *agp_final, *fa_final;
     int *resolutions, nr, rr, mq, ml, rl;
     int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, convert_binary;
     int8_t *telo_ends;
@@ -932,18 +932,19 @@ int main(int argc, char *argv[])
     link_file = argv[opt.ind + 1];
 
     if (f_type == NOSET) {
-        ext = link_file + strlen(link_file) - 4;
-        if (strcasecmp(ext, ".bam") == 0) f_type = BAM;
-        else if (strcasecmp(ext, ".bed") == 0) f_type = BED;
-        else if (strcasecmp(ext, ".bin") == 0) f_type = BIN;
-        else if (strcasecmp(ext, ".pa5") == 0) f_type = PA5;
+        ext1 = strlen(link_file) >= 4? (link_file + strlen(link_file) - 4) : NULL;
+        ext2 = strlen(link_file) >= 7? (link_file + strlen(link_file) - 7) : NULL;
+        if (ext1 && !strcasecmp(ext1, ".bam")) f_type = BAM;
+        else if (ext1 && !strcasecmp(ext1, ".bin")) f_type = BIN;
+        else if ((ext1 && !strcasecmp(ext1, ".bed")) || (ext2 && !strcasecmp(ext2, ".bed.gz"))) f_type = BED;
+        else if ((ext1 && !strcasecmp(ext1, ".pa5")) || (ext2 && !strcasecmp(ext2, ".pa5.gz"))) f_type = PA5;
         else {
             fprintf(stderr, "[E::%s] unknown link file format. File extension .bam, .bed, .pa5 or .bin or --file-type is expected\n", __func__);
             exit(EXIT_FAILURE);
         }
     }
 
-    if (f_type == BIN && (*link_file == '-' || *link_file == '<')) {
+    if (f_type == BIN && (strcmp(link_file, "-") == 0 || *link_file == '<')) {
         fprintf(stderr, "[E::%s] BIN file format from STDIN is not supported\n", __func__);
         exit(EXIT_FAILURE);
     }
