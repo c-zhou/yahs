@@ -99,12 +99,14 @@ uint32_t estimate_dist_thres_from_file(const char *f, asm_dict_t *dict, double m
     }
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     pair_c = intra_c = 0;
     while (pair_c < pair_n) {
@@ -193,12 +195,14 @@ link_mat_t *link_mat_from_file(const char *f, asm_dict_t *dict, uint32_t dist_th
     }
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     link_mat_t *link_mat = (link_mat_t *) malloc(sizeof(link_mat_t));
     link_mat->b = resolution;

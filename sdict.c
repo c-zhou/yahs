@@ -1065,10 +1065,12 @@ uint64_t write_sequence_dictionary(FILE *fo, sdict_t *dict)
 void file_seek_skip_sdict(FILE *fp)
 {
     uint32_t n;
-    uint64_t l;
-    fread(&n, sizeof(uint32_t), 1, fp);
+    uint64_t l, m;
+    m = fread(&n, sizeof(uint32_t), 1, fp);
+    if (m != 1) bin_fread_error();
     fseek(fp, sizeof(uint32_t) * n, SEEK_CUR);
-    fread(&l, sizeof(uint64_t), 1, fp);
+    m = fread(&l, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
     fseek(fp, l, SEEK_CUR);
 }
 
@@ -1085,15 +1087,18 @@ int file_sdict_match(char *f, sdict_t *dict)
         return 1;
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) 
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number))
         return 2;
 
-    fread(&n, sizeof(uint32_t), 1, fp);
+    m = fread(&n, sizeof(uint32_t), 1, fp);
+    if (m != 1) bin_fread_error();
     if (n != dict->n)
         return 3;
     
     lens = (uint32_t *) calloc(n, sizeof(uint32_t));
-    fread(lens, sizeof(uint32_t), n, fp);
+    m = fread(lens, sizeof(uint32_t), n, fp);
+    if (m != n) bin_fread_error();
     for (i = 0; i < n; ++i) {
         if (dict->s[i].len != lens[i]) {
             free(lens);
@@ -1102,9 +1107,11 @@ int file_sdict_match(char *f, sdict_t *dict)
     }
     free(lens);
     
-    fread(&l, sizeof(uint64_t), 1, fp);
+    m = fread(&l, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
     names = (char *) calloc(l, 1);
     m = fread(names, 1, l, fp);
+    if (m != l) bin_fread_error();
     for (p = names, i = 0; i < n; ++i) {
         s = strlen(dict->s[i].name);
         if (p - names >= l || strncmp(p, dict->s[i].name, s)) {

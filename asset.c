@@ -223,6 +223,12 @@ int is_valid_bin_header(int64_t n)
     return n == magic_number;
 }
 
+void bin_fread_error()
+{
+    fprintf(stderr, "[E::%s] error reading binary file\n", __func__);
+    exit(EXIT_FAILURE);
+}
+
 int strcmp_case_insensitive(const char *s1, const char *s2)
 {
     const unsigned char *p1 = (const unsigned char *) s1;

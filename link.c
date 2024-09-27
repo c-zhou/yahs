@@ -385,12 +385,14 @@ intra_link_mat_t *intra_link_mat_from_file(const char *f, cov_norm_t *cov_norm, 
         return 0;
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     link_mat = use_gap_seq? intra_link_mat_init(dict, resolution, use_gap_seq) : intra_link_mat_init(dict->sdict, resolution, use_gap_seq);
 
@@ -515,12 +517,14 @@ inter_link_mat_t *inter_link_mat_from_file(const char *f, cov_norm_t *cov_norm, 
         return 0;
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     n = dict->n;
     link_mat = inter_link_mat_init(dict, resolution, radius);
@@ -653,17 +657,22 @@ cov_norm_t *cov_norm_from_file(const char *f, sdict_t *dict)
         return 0;
 
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
+        fclose(fp);
         return 0;
     }
     file_seek_skip_sdict(fp);
     m = fread(&n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
     fseek(fp, n * 17, SEEK_CUR);
     m = fread(&n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
     norm_a = (double *) malloc(sizeof(double) * n);
-    fread(norm_a, sizeof(double), n, fp);
-
+    m = fread(norm_a, sizeof(double), n, fp);
+    if (m != n) bin_fread_error();
+    
     norm = (double **) malloc(sizeof(double *) * dict->n);
     norm[0] = norm_a;
     for (i = 1; i < dict->n; ++i)
@@ -1096,12 +1105,14 @@ int8_t *calc_link_directs_from_file(const char *f, asm_dict_t *dict, uint8_t mq)
         return 0;
     
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         return 0;
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     n = dict->n;
     na = (long) n * (n - 1) / 2;
@@ -1320,9 +1331,6 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
     if (so == ORDER_NAME) {
         // sorted by read names
         while (bam_read1(fp, b) >= 0 ) {
-            
-            if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             if (buff == 0) {
                 q0 = 255;
@@ -1413,6 +1421,9 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                     rname1 = 0;
                 }
             }
+
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
         }
     } else {
         // sorted by coordinates or others
@@ -1421,9 +1432,6 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
         q = 255;
 
         while (bam_read1(fp, b) >= 0) {
-            
-            if (++rec_c % 1000000 == 0)
-                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
 
             first = parse_bam_rec1(b, h, &cname0, &s0, &e0, &cname1, &s1);
 
@@ -1486,6 +1494,9 @@ void dump_links_from_bam_file(const char *f, const char *fai, uint32_t ml, uint8
                     ++pair_c;
                 }
             }
+
+            if (++rec_c % 1000000 == 0)
+                fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
         }
     }
 
@@ -1566,9 +1577,6 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
     while ((line = iostream_getline(fp)) != NULL) {
         if (is_empty_line(line))
             continue;
-
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     
         if (buff == 0) {
             cname0[0] = rname0[0] = '\0';
@@ -1651,6 +1659,9 @@ void dump_links_from_bed_file(const char *f, const char *fai, uint32_t ml, uint8
                 strcpy(rname0, rname1);
             }
         }
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     m = pos_compression(cov);
@@ -1724,9 +1735,6 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
         if (is_empty_line(line))
             continue;
 
-        if (++rec_c % 1000000 == 0)
-            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
-
         cname0[0] = cname1[0] = '\0';
         p0 = p1 = UINT32_MAX;
         q0 = q1 = 255;
@@ -1789,6 +1797,9 @@ void dump_links_from_pa5_file(const char *f, const char *fai, uint32_t ml, uint8
 
             ++pair_c;
         }
+
+        if (++rec_c % 1000000 == 0)
+            fprintf(stderr, "[I::%s] %lu million records processed, %lu read pairs \n", __func__, rec_c / 1000000, pair_c);
     }
 
     m = pos_compression(cov);

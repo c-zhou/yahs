@@ -72,12 +72,14 @@ static int make_juicer_pre_file_from_bin(char *f, char *agp, char *fai, uint8_t 
     }
     
     m = fread(&magic_number, sizeof(int64_t), 1, fp);
-    if (!m || !is_valid_bin_header(magic_number)) {
+    if (m != 1) bin_fread_error();
+    if (!is_valid_bin_header(magic_number)) {
         fprintf(stderr, "[E::%s] not a valid BIN file\n", __func__);
         exit(EXIT_FAILURE);
     }
     file_seek_skip_sdict(fp);
     m = fread(&pair_n, sizeof(uint64_t), 1, fp);
+    if (m != 1) bin_fread_error();
 
     pair_c = pair_u = 0;
     while (pair_c < pair_n) {
