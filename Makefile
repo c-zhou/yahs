@@ -7,7 +7,7 @@ PROG_EXTRA=
 LIBS=		-lm -lz
 DESTDIR=	~/bin
 
-.PHONY:all extra clean depend
+.PHONY: all extra clean depend test
 .SUFFIXES:.c .o
 
 .c.o:
@@ -34,6 +34,10 @@ clean:
 
 install:
 		cp $(PROG) $(DESTDIR)
+
+
+test:
+		@bash scripts/run_test.sh
 
 
 depend:
