@@ -880,7 +880,7 @@ static int assembly_to_agp(char *assembly, char *lift, sdict_t *sdict, FILE *fo)
         cid = strtol(line, &eptr, 10);
         if (coords[(abs(cid) - 1) * 3 + 2] > 0)
             kv_push(int, segs, cid);
-        while (*eptr != '\n') {
+        while (*eptr && *eptr != '\n') {
             cid = strtol(eptr + 1, &fptr, 10);
             if (coords[(abs(cid) - 1) * 3 + 2] > 0)
                 kv_push(int, segs, cid);
