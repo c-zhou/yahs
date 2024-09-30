@@ -28,7 +28,7 @@ hicaln="${test}.hic.bed.gz" # could be .bed, .bam or .bin file
 
 (${ROOT_DIR}/../juicer post ${TEST_OUTDIR}/test_out.JBAT.assembly ${TEST_OUTDIR}/test_out.JBAT.liftover.agp ${TEST_OUTDIR}/LYZE01.contigs.fasta.gz -o ${TEST_OUTDIR}/test_out.JBAT >/dev/null 2>&1 && echo "Juicer post DONE.") || { echo "Juicer post FAILED."; rm -rf ${TEST_OUTDIR}; exit 1; }
 
-# rm -rf ${TEST_OUTDIR}
+rm -rf ${TEST_OUTDIR}
 
 echo "Successful."
 
