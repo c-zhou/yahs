@@ -717,6 +717,7 @@ static void print_help(FILE *fp_help, int is_long_help)
         fprintf(fp_help, "\n");
         fprintf(fp_help, "    --convert-to-binary    make a binary ouput file from the input and exit\n");
         fprintf(fp_help, "    --print-telo-motifs    print telomeric motifs in the database and exit\n");
+        fprintf(fp_help, "    --search-telo-ends     search telomeric ends in the sequences and exit\n");
     }
     fprintf(fp_help, "\n");
     fprintf(fp_help, "    -o STR                 prefix of output files [yahs.out]\n");
@@ -739,7 +740,8 @@ static ko_longopt_t long_options[] = {
     { "read-length",       ko_required_argument, 311 },
     { "telo-motif",        ko_required_argument, 312 },
     { "print-telo-motifs", ko_no_argument, 313 },
-    { "convert-to-binary", ko_no_argument, 314 },
+    { "search-telo-ends",  ko_no_argument, 314 },
+    { "convert-to-binary", ko_no_argument, 315 },
     { "help",              ko_no_argument, 'h' },
     { "version",           ko_no_argument, 'V' },
     { 0, 0, 0 }
@@ -759,7 +761,7 @@ int main(int argc, char *argv[])
 
     char *fa, *fai, *agp, *link_file, *out, *restr, *ecstr, *ext1, *ext2, *link_bin_file, *agp_final, *fa_final;
     int *resolutions, nr, rr, mq, ml, rl;
-    int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, convert_binary;
+    int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, search_teloends, convert_binary;
     int8_t *telo_ends;
     double q_drop, d_mass_frac;
     enum fileTypes f_type;
@@ -781,6 +783,7 @@ int main(int argc, char *argv[])
     d_mass_frac = 0.99;
     convert_binary = 0;
     print_telomotifs = 0;
+    search_teloends = 0;
     f_type = NOSET;
     is_long_help = 0;
 
@@ -846,6 +849,8 @@ int main(int argc, char *argv[])
         } else if (c == 313) {
             print_telomotifs = 1;
         } else if (c == 314) {
+            search_teloends = 1;
+        } else if (c == 315) {
             convert_binary = 1;
         } else if (c == 'v') {
             VERBOSE = atoi(opt.arg);
@@ -876,6 +881,18 @@ int main(int argc, char *argv[])
     if (print_telomotifs) {
         fprintf(stderr, "[I::%s] telomeric motifs in the database:\n", __func__);
         list_telo_motifs(stderr);
+        return 0;
+    }
+
+    if (search_teloends) {
+        if (argc - opt.ind < 1) {
+            fprintf(stderr, "[E::%s] missing input: need a FASTA file\n", __func__);
+            return 1;
+        }
+        fprintf(stderr, "[I::%s] search telomeric ends in the sequence:\n", __func__);
+        telo_ends = telo_finder(argv[opt.ind], 0);
+        if (telo_ends)
+            free(telo_ends);
         return 0;
     }
 
