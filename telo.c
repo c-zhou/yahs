@@ -160,7 +160,7 @@ static uint64_t telo_finder_core(char *sequence, int slen, kh_64_t *mtab, int ml
 	return sum_telo;
 }
 
-int8_t *telo_finder(const char *f, uint32_t ml)
+int8_t *telo_finder(const char *f, uint32_t ml, FILE *out)
 {
 	int i, j, t, c, len, absent;
 	uint32_t nseq, ntelo;
@@ -208,13 +208,20 @@ int8_t *telo_finder(const char *f, uint32_t ml)
 				continue;
 			if ((telo>>32) > 0) {
 				telo_ends[i<<1] = 1;
-				fprintf(stderr, "[I::%s] found telo motif %s in sequence %s 5'-end up to position %u\n", 
-					__func__, telo_db[t], sdict->s[i].name, (uint32_t) (telo>>32));
+				if (out) 
+					fprintf(out, "%s\t0\t%u\t%s\n", sdict->s[i].name, (uint32_t) (telo>>32), telo_db[t]);
+				else
+					fprintf(stderr, "[I::%s] found telo motif %s in sequence %s 5'-end up to position %u\n", 
+						__func__, telo_db[t], sdict->s[i].name, (uint32_t) (telo>>32));
 			}
 			if ((uint32_t) telo > 0) {
 				telo_ends[i<<1|1] = 1;
-				fprintf(stderr, "[I::%s] found telo motif %s in sequence %s 3'-end from position %u\n", 
-					__func__, telo_db[t], sdict->s[i].name, sdict->s[i].len - (uint32_t) telo);
+				if (out) 
+					fprintf(out, "%s\t%u\t%u\t%s\n", sdict->s[i].name, sdict->s[i].len - (uint32_t) telo, 
+						sdict->s[i].len, telo_db[t]);
+				else
+					fprintf(stderr, "[I::%s] found telo motif %s in sequence %s 3'-end from position %u\n", 
+						__func__, telo_db[t], sdict->s[i].name, sdict->s[i].len - (uint32_t) telo);
 			}
 		}
 

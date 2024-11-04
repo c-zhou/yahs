@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <ctype.h>
+#include <errno.h>
 
 #include "ketopt.h"
 #include "kvec.h"
@@ -764,6 +765,7 @@ int main(int argc, char *argv[])
     int no_contig_ec, no_scaffold_ec, no_mem_check, d_min_cell, print_telomotifs, search_teloends, convert_binary;
     int8_t *telo_ends;
     double q_drop, d_mass_frac;
+    re_cuts_t *re_cuts;
     enum fileTypes f_type;
 
     const char *opt_str = "a:e:r:R:o:l:q:Vv:h";
@@ -771,8 +773,12 @@ int main(int argc, char *argv[])
 
     int c, ret, is_long_help;
     FILE *fp_help = stderr;
+    ret = 0;
     fa = fai = agp = link_file = out = restr = link_bin_file = agp_final = fa_final = 0;
     no_contig_ec = no_scaffold_ec = no_mem_check = 0;
+    resolutions = 0;
+    telo_ends = 0;
+    re_cuts = 0;
     rr = 1;
     mq = 10;
     ml = 0;
@@ -889,11 +895,21 @@ int main(int argc, char *argv[])
             fprintf(stderr, "[E::%s] missing input: need a FASTA file\n", __func__);
             return 1;
         }
-        fprintf(stderr, "[I::%s] search telomeric ends in the sequence:\n", __func__);
-        telo_ends = telo_finder(argv[opt.ind], 0);
+        if (out != 0 && strcmp(out, "-") != 0) {
+            if (freopen(out, "wb", stdout) == NULL) {
+                fprintf(stderr, "[ERROR]\033[1;31m failed to write the output to file '%s'\033[0m: %s\n", out, strerror(errno));
+                return 1;
+            }
+        }
+        fprintf(stderr, "[I::%s] search telomeric ends in the sequence\n", __func__);
+        telo_ends = telo_finder(argv[opt.ind], 0, stdout);
+        if (fflush(stdout) == EOF) {
+            fprintf(stderr, "[E::%s] failed to write the results\n", __func__);
+            return 1;
+        }
         if (telo_ends)
             free(telo_ends);
-        return 0;
+        goto print_command;
     }
 
     if (argc - opt.ind < 2) {
@@ -995,8 +1011,6 @@ int main(int argc, char *argv[])
         nr = default_nr(fai, ml);
     }
     
-    re_cuts_t *re_cuts;
-    re_cuts = 0;
     if (ecstr) {
         // restriction enzymes cutting sites
         int i, n;
@@ -1049,7 +1063,7 @@ int main(int argc, char *argv[])
         free(ecstr);
     }
 
-    telo_ends = telo_finder(fa, ml);
+    telo_ends = telo_finder(fa, ml, NULL);
 
     if (f_type == BAM) {
         link_bin_file = malloc(strlen(out) + 5);
@@ -1153,7 +1167,9 @@ final_clean:
 
     if (re_cuts)
         re_cuts_destroy(re_cuts);
-    
+
+print_command:
+
     fprintf(stderr, "[I::%s] Version: %s\n", __func__, YAHS_VERSION);
     fprintf(stderr, "[I::%s] CMD:", __func__);
     int i;

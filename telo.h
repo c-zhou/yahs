@@ -44,7 +44,7 @@ extern "C" {
 
 int check_motif(char *motif);
 void list_telo_motifs(FILE *fo);
-int8_t *telo_finder(const char *f, uint32_t ml);
+int8_t *telo_finder(const char *f, uint32_t ml, FILE *out);
 
 #ifdef __cplusplus
 }
